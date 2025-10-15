@@ -25,8 +25,6 @@ A Visual Studio Code extension that helps you visualize LangGraph graphs directl
    - **Search** for specific nodes
    - **Export** as PNG for documentation
 
-See [INTERACTIVE_FEATURES.md](INTERACTIVE_FEATURES.md) for a complete guide!
-
 ## Supported LangGraph Patterns
 
 The extension detects and parses the following patterns:

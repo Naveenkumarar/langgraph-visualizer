@@ -3,12 +3,32 @@
   "displayName": "LangGraph Visualizer",
   "description": "Interactive visualization of LangGraph graphs with drag-and-drop nodes, search, and jump-to-code",
   "version": "0.1.0",
+  "publisher": "Naveenkumarar",
+  "author": {
+    "name": "Naveen Kumar"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Naveenkumarar/langgraph-visualizer"
+  },
+  "bugs": {
+    "url": "https://github.com/Naveenkumarar/langgraph-visualizer/issues"
+  },
+  "homepage": "https://github.com/Naveenkumarar/langgraph-visualizer#readme",
   "engines": {
     "vscode": "^1.80.0"
   },
   "categories": [
     "Visualization",
     "Programming Languages"
+  ],
+  "keywords": [
+    "langgraph",
+    "graph",
+    "visualization",
+    "python",
+    "langchain"
   ],
   "activationEvents": [
     "onLanguage:python"
