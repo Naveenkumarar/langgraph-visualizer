@@ -6,7 +6,6 @@ import { WebviewProvider } from './webviewProvider';
 let statusBarItem: vscode.StatusBarItem;
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('LangGraph Visualizer extension is now active and running');
 
     // Create status bar item
     statusBarItem = vscode.window.createStatusBarItem(

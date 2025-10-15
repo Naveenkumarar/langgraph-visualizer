@@ -6,11 +6,14 @@ import { GraphStructure } from './graphParser';
  */
 export class WebviewProvider {
     private static currentPanel: vscode.WebviewPanel | undefined;
+    private static currentDocument: vscode.TextDocument | undefined;
 
     /**
      * Show the graph visualization in a webview panel
      */
     public static show(context: vscode.ExtensionContext, graphData: GraphStructure, document: vscode.TextDocument): void {
+        // Store the document reference for jump-to-code
+        WebviewProvider.currentDocument = document;
         const column = vscode.window.activeTextEditor
             ? vscode.window.activeTextEditor.viewColumn
             : undefined;
@@ -39,18 +42,83 @@ export class WebviewProvider {
             // Handle messages from the webview
             panel.webview.onDidReceiveMessage(
                 message => {
-                    console.log('Received message from webview:', message);
                     switch (message.command) {
                         case 'jumpToCode':
-                            console.log('Jump to code command received, line:', message.lineNumber);
-                            if (message.lineNumber && vscode.window.activeTextEditor) {
+                            if (message.lineNumber) {
                                 const line = message.lineNumber - 1; // VS Code uses 0-based line numbers
-                                console.log('Jumping to line:', line);
-                                const range = new vscode.Range(line, 0, line, 0);
-                                vscode.window.activeTextEditor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-                                vscode.window.activeTextEditor.selection = new vscode.Selection(line, 0, line, 0);
+
+                                // Use stored document or fallback to active editor
+                                const document = WebviewProvider.currentDocument || vscode.window.activeTextEditor?.document;
+                                if (!document) {
+                                    vscode.window.showErrorMessage('No document found. Please open the Python file first.');
+                                    return;
+                                }
+
+                                // Get the full line content
+                                const lineText = document.lineAt(line).text;
+                                const lineLength = lineText.length;
+
+                                // Create a range that covers the entire line
+                                const range = new vscode.Range(line, 0, line, lineLength);
+
+                                // Ensure the document is visible by opening it
+                                vscode.window.showTextDocument(document, {
+                                    viewColumn: vscode.ViewColumn.One,
+                                    preserveFocus: false,
+                                    preview: false
+                                }).then(editor => {
+                                    // Wait a moment for the editor to be ready
+                                    setTimeout(() => {
+                                        // Reveal the line in center and select it
+                                        editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+                                        editor.selection = new vscode.Selection(line, 0, line, lineLength);
+
+                                        // Create blinking decoration
+                                        const decoration = vscode.window.createTextEditorDecorationType({
+                                            backgroundColor: '#FFD700', // Bright yellow background
+                                            border: '3px solid #FF6B6B', // Red border
+                                            borderRadius: '5px',
+                                            fontWeight: 'bold',
+                                            opacity: '0.9'
+                                        });
+
+                                        let blinkCount = 0;
+                                        const maxBlinks = 8; // 4 seconds with 500ms intervals = 8 blinks
+                                        const blinkInterval = 500; // 500ms between blinks
+
+                                        // Blinking function
+                                        const blink = () => {
+                                            if (blinkCount % 2 === 0) {
+                                                // Show decoration
+                                                editor.setDecorations(decoration, [range]);
+                                            } else {
+                                                // Hide decoration
+                                                editor.setDecorations(decoration, []);
+                                            }
+                                            blinkCount++;
+
+                                            if (blinkCount < maxBlinks) {
+                                                setTimeout(blink, blinkInterval);
+                                            } else {
+                                                // Final cleanup - remove decoration completely
+                                                decoration.dispose();
+                                            }
+                                        };
+
+                                        // Start blinking
+                                        blink();
+
+                                        // Show a prominent message to confirm the jump
+                                        vscode.window.showInformationMessage(
+                                            `🎯 Jumped to line ${message.lineNumber}: ${lineText.trim()}`,
+                                            { modal: false }
+                                        );
+                                    }, 100);
+                                });
+
                             } else {
-                                console.warn('Cannot jump to code - no line number or no active editor');
+                                console.warn('Cannot jump to code - no line number');
+                                vscode.window.showErrorMessage('Cannot jump to code: No line number available');
                             }
                             return;
                     }
@@ -63,6 +131,7 @@ export class WebviewProvider {
             panel.onDidDispose(
                 () => {
                     WebviewProvider.currentPanel = undefined;
+                    WebviewProvider.currentDocument = undefined;
                 },
                 null,
                 context.subscriptions
@@ -462,6 +531,7 @@ export class WebviewProvider {
             </div>
         </div>
         
+        
         <div class="zoom-controls">
             <button class="zoom-button" id="zoomInBtn" title="Zoom In">+</button>
             <button class="zoom-button" id="zoomOutBtn" title="Zoom Out">−</button>
@@ -472,9 +542,9 @@ export class WebviewProvider {
     <script>
         const vscode = acquireVsCodeApi();
         
+        
         // Graph data
         const graphData = ${JSON.stringify(cytoscapeElements)};
-        console.log('Graph data being rendered:', graphData);
         
         // Check if Cytoscape is loaded
         if (typeof cytoscape === 'undefined') {
@@ -482,13 +552,9 @@ export class WebviewProvider {
                 '<div class="help-icon">⚠️</div>' +
                 '<div><strong>Loading Error</strong><br>Failed to load Cytoscape.js library. Using fallback visualization.</div>';
             document.getElementById('helpText').classList.remove('hidden');
-            console.error('Cytoscape.js failed to load');
             
             // Show fallback visualization
             showFallbackVisualization();
-        } else {
-            console.log('Cytoscape.js loaded successfully');
-            console.log('Graph data:', graphData);
         }
         
         // Fallback visualization function
@@ -639,7 +705,6 @@ export class WebviewProvider {
             wheelSensitivity: 0.2
         });
         
-        console.log('Cytoscape initialized with', cy.nodes().length, 'nodes and', cy.edges().length, 'edges');
         
         } catch (error) {
             console.error('Failed to initialize Cytoscape:', error);
@@ -666,43 +731,73 @@ export class WebviewProvider {
         
         // Node click handler - show details (only if cy is defined)
         let selectedNode = null;
+        let selectedNodeData = null; // Store the data separately to prevent it from being lost
+        
         if (cy) {
             cy.on('tap', 'node', function(evt) {
             const node = evt.target;
             selectedNode = node;
-            const data = node.data();
+            selectedNodeData = node.data();
             
-            document.getElementById('nodeInfoName').textContent = data.label;
-            document.getElementById('nodeInfoBadge').textContent = data.type;
-            document.getElementById('nodeInfoBadge').className = 'node-badge ' + data.type;
-            document.getElementById('nodeInfoFunction').textContent = data.functionName || '-';
-            document.getElementById('nodeInfoLine').textContent = data.lineNumber || '-';
-            document.getElementById('nodeInfoType').textContent = data.type;
+            
+            document.getElementById('nodeInfoName').textContent = selectedNodeData.label;
+            document.getElementById('nodeInfoBadge').textContent = selectedNodeData.type;
+            document.getElementById('nodeInfoBadge').className = 'node-badge ' + selectedNodeData.type;
+            document.getElementById('nodeInfoFunction').textContent = selectedNodeData.functionName || '-';
+            document.getElementById('nodeInfoLine').textContent = selectedNodeData.lineNumber || '-';
+            document.getElementById('nodeInfoType').textContent = selectedNodeData.type;
             document.getElementById('nodeInfo').classList.add('visible');
         });
         
             // Click on canvas to deselect
             cy.on('tap', function(evt) {
                 if (evt.target === cy) {
+                    // Don't deselect if we're clicking on UI elements
+                    const target = evt.originalEvent.target;
+                    if (target && (target.closest('#nodeInfo') || target.closest('button'))) {
+                        return;
+                    }
+                    
                     document.getElementById('nodeInfo').classList.remove('visible');
                     selectedNode = null;
+                    selectedNodeData = null;
                 }
             });
         
         // Jump to code button
-        document.getElementById('jumpToCodeBtn').addEventListener('click', () => {
-            if (selectedNode) {
-                const lineNumber = selectedNode.data('lineNumber');
-                console.log('Jump to code clicked, line number:', lineNumber);
+        document.getElementById('jumpToCodeBtn').addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            
+            // Small delay to ensure the button click is processed before any canvas click
+            setTimeout(() => {
+            if (selectedNodeData) {
+                const lineNumber = selectedNodeData.lineNumber;
+                
                 if (lineNumber) {
                     vscode.postMessage({
                         command: 'jumpToCode',
                         lineNumber: lineNumber
                     });
                 } else {
-                    console.warn('No line number available for node:', selectedNode.data());
+                    alert('No line number available for this node');
                 }
+            } else if (selectedNode) {
+                const lineNumber = selectedNode.data('lineNumber');
+                
+                if (lineNumber) {
+                    vscode.postMessage({
+                        command: 'jumpToCode',
+                        lineNumber: lineNumber
+                    });
+                } else {
+                    alert('No line number available for this node');
+                }
+            } else {
+                alert('Please select a node first by clicking on it in the graph');
             }
+            }, 10); // Small delay to prevent race condition
         });
         
             // Search functionality
@@ -817,12 +912,13 @@ export class WebviewProvider {
                 document.body.style.cursor = 'default';
             });
         }
+        
     </script>
 </body>
 </html>`;
     }
 
-    /**
+    /*
      * Convert GraphStructure to Cytoscape format
      */
     private static convertToCytoscapeFormat(graphData: GraphStructure): any {
