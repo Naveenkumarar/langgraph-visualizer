@@ -6,15 +6,26 @@ A Visual Studio Code extension that helps you visualize LangGraph graphs directl
 
 - **Automatic Detection**: Automatically detects LangGraph code in Python files
 - **Status Bar Integration**: Shows a convenient status bar icon when LangGraph code is detected
-- **Graph Visualization**: View nodes and edges of your LangGraph graphs in a clean webview panel
+- **Interactive Graph Visualization**: Beautiful, interactive graph with draggable nodes powered by Cytoscape.js
 - **Real-time Updates**: Status bar updates as you edit your code
+- **Jump to Code**: Click any node and jump directly to its definition
+- **Search & Filter**: Find nodes instantly with the search bar
+- **Zoom & Pan**: Navigate large graphs with smooth controls
+- **Export**: Save your graph as PNG for documentation
 
 ## Usage
 
 1. Open a Python file containing LangGraph code
 2. When LangGraph classes (StateGraph, MessageGraph, etc.) are detected, a status bar item will appear
 3. Click the "$(graph) LangGraph" icon in the status bar to visualize the graph
-4. View the nodes and edges in the webview panel
+4. Interact with the visualization:
+   - **Drag nodes** to reposition them
+   - **Zoom** with mouse wheel or buttons
+   - **Click nodes** to see details and jump to code
+   - **Search** for specific nodes
+   - **Export** as PNG for documentation
+
+See [INTERACTIVE_FEATURES.md](INTERACTIVE_FEATURES.md) for a complete guide!
 
 ## Supported LangGraph Patterns
 
@@ -49,8 +60,10 @@ compiled_graph = graph.compile()
 ```
 
 When you open this file, click the LangGraph icon in the status bar to see:
-- **Nodes**: start, process, end
-- **Edges**: start → process, process → end
+- **Interactive Graph**: Nodes arranged in a hierarchical layout
+- **Node Details**: Click nodes to see function names and line numbers
+- **Color Coding**: Green (start) → Blue (process) → Red (end)
+- **Jump to Code**: Click any node and navigate to its definition instantly
 
 ## Requirements
 
@@ -69,11 +82,15 @@ To run the extension in development mode:
 
 ## Future Enhancements
 
-- Interactive graph visualization with diagrams
-- Export graph as image
-- Navigate to node/edge definitions in code
+- ✅ Interactive graph visualization with diagrams
+- ✅ Export graph as image
+- ✅ Navigate to node/edge definitions in code
+- Custom color schemes and themes
+- Save and restore graph layouts
+- Animation of execution flow
 - Support for more complex LangGraph patterns
 - Graph validation and error detection
+- Multiple layout algorithms
 
 ## License
 

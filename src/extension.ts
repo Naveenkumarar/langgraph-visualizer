@@ -6,7 +6,7 @@ import { WebviewProvider } from './webviewProvider';
 let statusBarItem: vscode.StatusBarItem;
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('LangGraph Visualizer extension is now active');
+    console.log('LangGraph Visualizer extension is now active and running');
 
     // Create status bar item
     statusBarItem = vscode.window.createStatusBarItem(
@@ -40,7 +40,7 @@ export function activate(context: vscode.ExtensionContext) {
             const graphData = GraphParser.parseDocument(document);
 
             // Show the visualization
-            WebviewProvider.show(context, graphData);
+            WebviewProvider.show(context, graphData, document);
         }
     );
     context.subscriptions.push(showGraphCommand);

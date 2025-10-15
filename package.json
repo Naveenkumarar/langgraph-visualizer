@@ -1,8 +1,8 @@
 {
   "name": "langgraph-visualizer",
   "displayName": "LangGraph Visualizer",
-  "description": "Visualize LangGraph graphs in VS Code",
-  "version": "0.0.1",
+  "description": "Interactive visualization of LangGraph graphs with drag-and-drop nodes, search, and jump-to-code",
+  "version": "0.1.0",
   "engines": {
     "vscode": "^1.80.0"
   },

@@ -4,6 +4,8 @@ export interface GraphNode {
     id: string;
     label: string;
     type: 'node' | 'start' | 'end';
+    functionName?: string;
+    lineNumber?: number;
 }
 
 export interface GraphEdge {
@@ -64,17 +66,24 @@ export class GraphParser {
         const nodeSet = new Set<string>();
 
         // Pattern for .add_node("node_name", function)
-        const addNodePattern = /\.add_node\s*\(\s*["']([^"']+)["']/g;
+        const addNodePattern = /\.add_node\s*\(\s*["']([^"']+)["']\s*,\s*([a-zA-Z_][a-zA-Z0-9_]*)/g;
         let match;
 
         while ((match = addNodePattern.exec(text)) !== null) {
             const nodeName = match[1];
+            const functionName = match[2];
             if (!nodeSet.has(nodeName)) {
                 nodeSet.add(nodeName);
+
+                // Find line number
+                const lineNumber = this.getLineNumber(text, match.index);
+
                 nodes.push({
                     id: nodeName,
                     label: nodeName,
-                    type: 'node'
+                    type: 'node',
+                    functionName: functionName,
+                    lineNumber: lineNumber
                 });
             }
         }
@@ -171,6 +180,13 @@ export class GraphParser {
         }
 
         return edges;
+    }
+
+    /**
+     * Get line number for a character index in text
+     */
+    private static getLineNumber(text: string, index: number): number {
+        return text.substring(0, index).split('\n').length;
     }
 }
 
