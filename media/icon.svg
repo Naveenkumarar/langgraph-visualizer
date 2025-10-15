@@ -1,0 +1,23 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="#2196F3" opacity="0.1"/>
+  
+  <!-- Graph nodes -->
+  <circle cx="64" cy="30" r="12" fill="#4CAF50" stroke="#2E7D32" stroke-width="2"/>
+  <circle cx="35" cy="70" r="12" fill="#2196F3" stroke="#1565C0" stroke-width="2"/>
+  <circle cx="64" cy="70" r="12" fill="#2196F3" stroke="#1565C0" stroke-width="2"/>
+  <circle cx="93" cy="70" r="12" fill="#2196F3" stroke="#1565C0" stroke-width="2"/>
+  <circle cx="64" cy="98" r="12" fill="#F44336" stroke="#C62828" stroke-width="2"/>
+  
+  <!-- Edges/connections -->
+  <line x1="64" y1="42" x2="35" y2="58" stroke="#666" stroke-width="3" opacity="0.6"/>
+  <line x1="64" y1="42" x2="64" y2="58" stroke="#666" stroke-width="3" opacity="0.6"/>
+  <line x1="64" y1="42" x2="93" y2="58" stroke="#666" stroke-width="3" opacity="0.6"/>
+  <line x1="35" y1="82" x2="64" y2="86" stroke="#666" stroke-width="3" opacity="0.6"/>
+  <line x1="64" y1="82" x2="64" y2="86" stroke="#666" stroke-width="3" opacity="0.6"/>
+  <line x1="93" y1="82" x2="64" y2="86" stroke="#666" stroke-width="3" opacity="0.6"/>
+  
+  <!-- Arrows -->
+  <polygon points="64,86 61,83 67,83" fill="#666" opacity="0.6"/>
+</svg>
+
