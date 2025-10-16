@@ -312,6 +312,20 @@ export class WebviewProvider {
             background-color: #FF9800;
             border: none;
         }
+        .legend-color.main-graph-parent { 
+            width: 30px;
+            height: 20px;
+            background-color: #fff3e0;
+            border: 4px solid #ff9800;
+            border-radius: 3px;
+        }
+        .legend-color.subgraph-parent { 
+            width: 30px;
+            height: 20px;
+            background-color: #f0f8ff;
+            border: 3px solid #2196f3;
+            border-radius: 3px;
+        }
         
         #nodeInfo {
             position: absolute;
@@ -485,6 +499,14 @@ export class WebviewProvider {
             <div class="legend-item">
                 <div class="legend-color conditional"></div>
                 <span>Conditional Edge</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color main-graph-parent"></div>
+                <span>Main Graph Container</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color subgraph-parent"></div>
+                <span>Subgraph Container</span>
             </div>
         </div>
         
@@ -682,6 +704,90 @@ export class WebviewProvider {
                     selector: '.dimmed',
                     style: {
                         'opacity': 0.2
+                    }
+                },
+                {
+                    selector: 'node[type="subgraph"]',
+                    style: {
+                        'background-color': '#e3f2fd',
+                        'border-color': '#2196f3',
+                        'border-width': '3px',
+                        'border-style': 'dashed'
+                    }
+                },
+                {
+                    selector: 'node[type="subgraph-parent"]',
+                    style: {
+                        'background-color': '#f0f8ff',
+                        'border-color': '#2196f3',
+                        'border-width': '3px',
+                        'border-style': 'solid',
+                        'shape': 'rectangle',
+                        'width': 'data(width)',
+                        'height': 'data(height)',
+                        'text-valign': 'top',
+                        'text-halign': 'center',
+                        'color': '#2196f3',
+                        'font-weight': 'bold',
+                        'font-size': '12px',
+                        'padding': '10px',
+                        'text-wrap': 'wrap',
+                        'text-max-width': '200px'
+                    }
+                },
+                {
+                    selector: '.subgraph-parent',
+                    style: {
+                        'background-color': '#f0f8ff',
+                        'border-color': '#2196f3',
+                        'border-width': '3px',
+                        'border-style': 'solid',
+                        'shape': 'rectangle'
+                    }
+                },
+                {
+                    selector: 'node:parent',
+                    style: {
+                        'background-opacity': 0.1,
+                        'border-opacity': 1,
+                        'text-opacity': 1
+                    }
+                },
+                {
+                    selector: 'node:parent node',
+                    style: {
+                        'background-opacity': 1,
+                        'border-opacity': 1
+                    }
+                },
+                {
+                    selector: 'node[type="main-graph-parent"]',
+                    style: {
+                        'background-color': '#fff3e0',
+                        'border-color': '#ff9800',
+                        'border-width': '4px',
+                        'border-style': 'solid',
+                        'shape': 'rectangle',
+                        'width': 'data(width)',
+                        'height': 'data(height)',
+                        'text-valign': 'top',
+                        'text-halign': 'center',
+                        'color': '#ff9800',
+                        'font-weight': 'bold',
+                        'font-size': '14px',
+                        'padding': '15px',
+                        'text-wrap': 'wrap',
+                        'text-max-width': '300px'
+                    }
+                },
+                {
+                    selector: '.main-graph-parent',
+                    style: {
+                        'background-color': '#fff3e0',
+                        'border-color': '#ff9800',
+                        'border-width': '4px',
+                        'border-style': 'solid',
+                        'shape': 'rectangle'
                     }
                 }
             ],
@@ -941,8 +1047,21 @@ export class WebviewProvider {
         const nodes: any[] = [];
         const edges: any[] = [];
 
-        // Add all nodes from main graph and subgraphs
-        this.processGraphRecursively(graphData, nodes, edges, '');
+        // Add main graph container
+        const mainGraphId = 'main_graph_container';
+        nodes.push({
+            data: {
+                id: mainGraphId,
+                label: 'Main Graph: ' + graphData.graphType,
+                type: 'main-graph-parent',
+                width: 400,
+                height: 300
+            },
+            classes: 'main-graph-parent'
+        });
+
+        // Add all nodes from main graph and subgraphs with main graph as parent
+        this.processGraphRecursively(graphData, nodes, edges, '', mainGraphId);
 
         return { nodes, edges };
     }
@@ -954,30 +1073,51 @@ export class WebviewProvider {
         graph: GraphStructure,
         nodes: any[],
         edges: any[],
-        prefix: string
+        prefix: string,
+        parentId?: string
     ): void {
         // Add main graph nodes
         graph.nodes.forEach(node => {
             const nodeId = prefix + node.id;
+            const nodeData: any = {
+                id: nodeId,
+                label: node.label,
+                type: node.type,
+                functionName: node.functionName,
+                lineNumber: node.lineNumber,
+                filePath: node.filePath || graph.filePath
+            };
+
+            // If this is a child node, set the parent
+            if (parentId) {
+                nodeData.parent = parentId;
+            }
+
             nodes.push({
-                data: {
-                    id: nodeId,
-                    label: node.label,
-                    type: node.type,
-                    functionName: node.functionName,
-                    lineNumber: node.lineNumber,
-                    filePath: node.filePath || graph.filePath
-                }
+                data: nodeData
             });
 
-            // If node has subgraph, add subgraph nodes with prefix
+            // If node has subgraph, create a compound node (parent) and add subgraph nodes as children
             if (node.subgraph) {
-                // Ensure subgraph nodes inherit the correct file path
+                // Add the parent compound node (the rectangle box)
+                const parentId = nodeId + '_parent';
+                nodes.push({
+                    data: {
+                        id: parentId,
+                        label: node.label + ' Subgraph',
+                        type: 'subgraph-parent',
+                        width: 300,
+                        height: 200
+                    },
+                    classes: 'subgraph-parent'
+                });
+
+                // Ensure subgraph nodes inherit the correct file path and set parent
                 const subgraphWithFilePath = {
                     ...node.subgraph,
                     filePath: node.subgraph.filePath || node.filePath
                 };
-                this.processGraphRecursively(subgraphWithFilePath, nodes, edges, nodeId + '_');
+                this.processGraphRecursively(subgraphWithFilePath, nodes, edges, nodeId + '_', parentId);
             }
         });
 
