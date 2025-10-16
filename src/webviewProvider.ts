@@ -312,6 +312,18 @@ export class WebviewProvider {
             background-color: #FF9800;
             border: none;
         }
+        .legend-color.subgraph-entry { 
+            width: 30px;
+            height: 3px;
+            background-color: #4CAF50;
+            border: none;
+        }
+        .legend-color.subgraph-exit { 
+            width: 30px;
+            height: 3px;
+            background-color: #F44336;
+            border: none;
+        }
         .legend-color.main-graph-parent { 
             width: 30px;
             height: 20px;
@@ -501,6 +513,14 @@ export class WebviewProvider {
                 <span>Conditional Edge</span>
             </div>
             <div class="legend-item">
+                <div class="legend-color subgraph-entry"></div>
+                <span>Subgraph Entry</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color subgraph-exit"></div>
+                <span>Subgraph Exit</span>
+            </div>
+            <div class="legend-item">
                 <div class="legend-color main-graph-parent"></div>
                 <span>Main Graph Container</span>
             </div>
@@ -662,12 +682,12 @@ export class WebviewProvider {
                 {
                     selector: 'edge',
                     style: {
-                        'width': 3,
+                        'width': 2,
                         'line-color': '#2196F3',
                         'target-arrow-color': '#2196F3',
                         'target-arrow-shape': 'triangle',
-                        'curve-style': 'bezier',
-                        'arrow-scale': 1.5,
+                        'curve-style': 'straight',
+                        'arrow-scale': 1.2,
                         'transition-property': 'line-color, target-arrow-color, width',
                         'transition-duration': '0.2s'
                     }
@@ -678,6 +698,46 @@ export class WebviewProvider {
                         'line-color': '#FF9800',
                         'target-arrow-color': '#FF9800',
                         'line-style': 'dashed'
+                    }
+                },
+                {
+                    selector: 'edge[type="subgraph-entry"]',
+                    style: {
+                        'line-color': '#4CAF50',
+                        'target-arrow-color': '#4CAF50',
+                        'line-width': 4,
+                        'target-arrow-shape': 'triangle',
+                        'target-arrow-size': 10,
+                        'curve-style': 'bezier',
+                        'control-point-step-size': 100,
+                        'control-point-distances': [50, 100],
+                        'control-point-weights': [0.25, 0.75],
+                        'label': 'data(label)',
+                        'text-rotation': 'autorotate',
+                        'text-margin-y': -15,
+                        'font-size': '12px',
+                        'color': '#4CAF50',
+                        'font-weight': 'bold'
+                    }
+                },
+                {
+                    selector: 'edge[type="subgraph-exit"]',
+                    style: {
+                        'line-color': '#F44336',
+                        'target-arrow-color': '#F44336',
+                        'line-width': 4,
+                        'target-arrow-shape': 'triangle',
+                        'target-arrow-size': 10,
+                        'curve-style': 'bezier',
+                        'control-point-step-size': 100,
+                        'control-point-distances': [50, 100],
+                        'control-point-weights': [0.25, 0.75],
+                        'label': 'data(label)',
+                        'text-rotation': 'autorotate',
+                        'text-margin-y': -15,
+                        'font-size': '12px',
+                        'color': '#F44336',
+                        'font-weight': 'bold'
                     }
                 },
                 {
@@ -794,9 +854,13 @@ export class WebviewProvider {
             layout: {
                 name: 'dagre',
                 rankDir: 'TB',
-                nodeSep: 50,
-                rankSep: 100,
-                padding: 50
+                nodeSep: 20,
+                rankSep: 40,
+                padding: 20,
+                edgeSep: 15,
+                align: 'UL',
+                acyclicer: 'greedy',
+                spacingFactor: 1.0
             },
             minZoom: 0.3,
             maxZoom: 3,
@@ -824,7 +888,42 @@ export class WebviewProvider {
         if (cy && cy.nodes().length > 0) {
             setTimeout(() => {
                 document.getElementById('helpText').classList.add('hidden');
+                // Apply alternating subgraph positioning
+                applyAlternatingSubgraphLayout();
             }, 3000);
+        }
+
+        // Function to position subgraphs in alternating left-right pattern
+        function applyAlternatingSubgraphLayout() {
+            if (!cy) return;
+            
+            const subgraphParents = cy.nodes('[type="subgraph-parent"]');
+            
+            if (subgraphParents.length === 0) return;
+            
+            // Get the main graph container bounds
+            const mainContainer = cy.nodes('[type="main-graph-parent"]');
+            const mainBounds = mainContainer.boundingBox();
+            const centerX = mainBounds.x1 + mainBounds.w / 2;
+            const topY = mainBounds.y1; // Start from top of main container
+            
+            // Position subgraphs in alternating pattern starting from top
+            subgraphParents.forEach((subgraph, index) => {
+                const isLeft = index % 2 === 0;
+                const offsetX = isLeft ? -250 : 250; // Left or right offset (increased for better separation)
+                const offsetY = Math.floor(index / 2) * 180; // Vertical stacking (increased spacing)
+                
+                const newX = centerX + offsetX;
+                const newY = topY + offsetY; // Start from top, not center
+                
+                subgraph.position({
+                    x: newX,
+                    y: newY
+                });
+            });
+            
+            // Refresh the layout
+            cy.fit(50);
         }
         
         // Node click handler - show details (only if cy is defined)
@@ -945,11 +1044,19 @@ export class WebviewProvider {
                     cy.layout({
                         name: 'dagre',
                         rankDir: 'TB',
-                        nodeSep: 50,
-                        rankSep: 100,
-                        padding: 50
+                        nodeSep: 20,
+                        rankSep: 40,
+                        padding: 20,
+                        edgeSep: 15,
+                        align: 'UL',
+                        acyclicer: 'greedy',
+                        spacingFactor: 1.0
                     }).run();
-                    cy.fit(50);
+                    
+                    // Apply alternating subgraph positioning after layout
+                    setTimeout(() => {
+                        applyAlternatingSubgraphLayout();
+                    }, 100);
                 }
             });
         
@@ -1118,13 +1225,23 @@ export class WebviewProvider {
                     filePath: node.subgraph.filePath || node.filePath
                 };
                 this.processGraphRecursively(subgraphWithFilePath, nodes, edges, nodeId + '_', parentId);
+
+                // Add arrows: main node -> subgraph start and subgraph end -> next main node
+                this.addSubgraphArrows(node, nodeId, parentId, edges, graph.nodes);
             }
         });
 
-        // Add main graph edges
+        // Add main graph edges (but skip edges from nodes that have subgraphs)
         graph.edges.forEach(edge => {
             const sourceId = prefix + edge.from;
             const targetId = prefix + edge.to;
+
+            // Check if the source node has a subgraph
+            const sourceNode = graph.nodes.find(node => node.id === edge.from);
+            if (sourceNode && sourceNode.subgraph) {
+                // Skip this edge - the flow will go through the subgraph instead
+                return;
+            }
 
             edges.push({
                 data: {
@@ -1156,5 +1273,56 @@ export class WebviewProvider {
                 });
             }
         });
+    }
+
+    /**
+     * Add arrows between main graph nodes and subgraphs
+     */
+    private static addSubgraphArrows(
+        node: any,
+        nodeId: string,
+        parentId: string,
+        edges: any[],
+        allNodes: any[]
+    ): void {
+        // Find the subgraph start and end nodes
+        const subgraphStart = node.subgraph.nodes.find((n: any) => n.type === 'start');
+        const subgraphEnd = node.subgraph.nodes.find((n: any) => n.type === 'end');
+
+        if (subgraphStart) {
+            // Arrow from main node to subgraph start
+            const subgraphStartId = nodeId + '_' + subgraphStart.id;
+            edges.push({
+                data: {
+                    id: nodeId + '_to_' + subgraphStartId,
+                    source: nodeId,
+                    target: subgraphStartId,
+                    type: 'subgraph-entry',
+                    label: '→ Subgraph'
+                }
+            });
+        }
+
+        if (subgraphEnd) {
+            // Find the next main graph node after this one
+            const currentNodeIndex = allNodes.findIndex(n => n.id === node.id);
+            const nextNode = allNodes[currentNodeIndex + 1];
+
+            if (nextNode) {
+                // Arrow from subgraph end to next main node
+                const subgraphEndId = nodeId + '_' + subgraphEnd.id;
+                const nextNodeId = nextNode.id; // No prefix for main graph nodes
+
+                edges.push({
+                    data: {
+                        id: subgraphEndId + '_to_' + nextNodeId,
+                        source: subgraphEndId,
+                        target: nextNodeId,
+                        type: 'subgraph-exit',
+                        label: 'Subgraph →'
+                    }
+                });
+            }
+        }
     }
 }
