@@ -1,9 +1,9 @@
 {
   "name": "langgraph-visualizer",
-  "displayName": "LangGraph Visualizer",
+  "displayName": "LangGraph Visualizer by Smazee Apps",
   "description": "Interactive visualization of LangGraph graphs with drag-and-drop nodes, search, and jump-to-code",
-  "version": "0.1.0",
-  "publisher": "Naveenkumarar",
+  "version": "0.2.0",
+  "publisher": "smazee",
   "author": {
     "name": "Naveen Kumar"
   },

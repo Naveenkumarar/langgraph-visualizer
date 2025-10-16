@@ -6,6 +6,10 @@ export interface GraphNode {
     type: 'node' | 'start' | 'end';
     functionName?: string;
     lineNumber?: number;
+    filePath?: string;           // NEW: Source file path
+    subgraph?: GraphStructure;   // NEW: Nested subgraph if this node contains one
+    imports?: string[];          // NEW: Files imported by this node's function
+    hasSubgraph?: boolean;       // NEW: Whether this node contains a subgraph
 }
 
 export interface GraphEdge {
@@ -19,6 +23,11 @@ export interface GraphStructure {
     nodes: GraphNode[];
     edges: GraphEdge[];
     graphType: string;
+    filePath?: string;           // NEW: Source file path
+    imports?: string[];          // NEW: Files imported by this graph
+    subgraphs?: GraphStructure[]; // NEW: Nested subgraphs
+    parentGraph?: string;        // NEW: Parent graph ID if this is a subgraph
+    level?: number;              // NEW: Nesting level (0 = root, 1 = first level subgraph, etc.)
 }
 
 /**
@@ -30,7 +39,13 @@ export class GraphParser {
      */
     public static parseDocument(document: vscode.TextDocument): GraphStructure {
         const text = document.getText();
+        return this.parseText(text);
+    }
 
+    /**
+     * Parse text directly and extract graph structure (without creating documents)
+     */
+    public static parseText(text: string): GraphStructure {
         const nodes = this.extractNodes(text);
         const edges = this.extractEdges(text);
         const graphType = this.detectGraphType(text);
@@ -65,13 +80,27 @@ export class GraphParser {
         const nodes: GraphNode[] = [];
         const nodeSet = new Set<string>();
 
-        // Pattern for .add_node("node_name", function)
-        const addNodePattern = /\.add_node\s*\(\s*["']([^"']+)["']\s*,\s*([a-zA-Z_][a-zA-Z0-9_]*)/g;
+        // Pattern for .add_node("node_name", function) - enhanced to handle function calls
+        const addNodePattern = /\.add_node\s*\(\s*["']([^"']+)["']\s*,\s*([^)]+)\)/g;
         let match;
 
         while ((match = addNodePattern.exec(text)) !== null) {
             const nodeName = match[1];
-            const functionName = match[2];
+            const functionExpression = match[2].trim();
+
+            // Extract the actual function name from the expression
+            let functionName = functionExpression;
+
+            // Handle cases like: create_worker_a_graph().compile()
+            const functionCallMatch = functionExpression.match(/([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/);
+            if (functionCallMatch) {
+                functionName = functionCallMatch[1];
+            }
+            // Handle cases like: lambda x: {...}
+            else if (functionExpression.startsWith('lambda')) {
+                functionName = 'lambda';
+            }
+
             if (!nodeSet.has(nodeName)) {
                 nodeSet.add(nodeName);
 

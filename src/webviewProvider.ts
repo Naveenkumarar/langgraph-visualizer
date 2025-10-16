@@ -12,18 +12,15 @@ export class WebviewProvider {
      * Show the graph visualization in a webview panel
      */
     public static show(context: vscode.ExtensionContext, graphData: GraphStructure, document: vscode.TextDocument): void {
-        // Store the document reference for jump-to-code
         WebviewProvider.currentDocument = document;
         const column = vscode.window.activeTextEditor
             ? vscode.window.activeTextEditor.viewColumn
             : undefined;
 
-        // If we already have a panel, show it
         if (WebviewProvider.currentPanel) {
             WebviewProvider.currentPanel.reveal(column);
             WebviewProvider.currentPanel.webview.html = this.getWebviewContent(graphData);
         } else {
-            // Otherwise, create a new panel
             const panel = vscode.window.createWebviewPanel(
                 'langgraphVisualizer',
                 'LangGraph Visualization',
@@ -35,116 +32,100 @@ export class WebviewProvider {
             );
 
             WebviewProvider.currentPanel = panel;
-
-            // Set the webview's content
             panel.webview.html = this.getWebviewContent(graphData);
 
-            // Handle messages from the webview
             panel.webview.onDidReceiveMessage(
                 message => {
                     switch (message.command) {
                         case 'jumpToCode':
                             if (message.lineNumber) {
-                                const line = message.lineNumber - 1; // VS Code uses 0-based line numbers
+                                const line = message.lineNumber - 1;
 
-                                // Use stored document or fallback to active editor
-                                const document = WebviewProvider.currentDocument || vscode.window.activeTextEditor?.document;
-                                if (!document) {
-                                    vscode.window.showErrorMessage('No document found. Please open the Python file first.');
-                                    return;
+                                // Helper function to jump to line in a document
+                                const jumpToLineInDocument = (document: vscode.TextDocument, lineNumber: number) => {
+                                    const lineText = document.lineAt(lineNumber).text;
+                                    const lineLength = lineText.length;
+                                    const range = new vscode.Range(lineNumber, 0, lineNumber, lineLength);
+
+                                    vscode.window.showTextDocument(document, {
+                                        viewColumn: vscode.ViewColumn.One,
+                                        preserveFocus: false,
+                                        preview: false
+                                    }).then(editor => {
+                                        setTimeout(() => {
+                                            editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+                                            editor.selection = new vscode.Selection(lineNumber, 0, lineNumber, lineLength);
+
+                                            const decoration = vscode.window.createTextEditorDecorationType({
+                                                backgroundColor: '#FFD700',
+                                                border: '3px solid #FF6B6B',
+                                                borderRadius: '5px',
+                                                fontWeight: 'bold',
+                                                opacity: '0.9'
+                                            });
+
+                                            let blinkCount = 0;
+                                            const maxBlinks = 8;
+                                            const blinkInterval = 500;
+
+                                            const blink = () => {
+                                                if (blinkCount % 2 === 0) {
+                                                    editor.setDecorations(decoration, [range]);
+                                                } else {
+                                                    editor.setDecorations(decoration, []);
+                                                }
+                                                blinkCount++;
+
+                                                if (blinkCount < maxBlinks) {
+                                                    setTimeout(blink, blinkInterval);
+                                                } else {
+                                                    decoration.dispose();
+                                                }
+                                            };
+
+                                            blink();
+                                        }, 100);
+                                    });
+                                };
+
+                                // Use the provided filePath or fallback to current document
+                                if (message.filePath) {
+                                    // Open the specific file
+                                    const targetUri = vscode.Uri.file(message.filePath);
+                                    vscode.workspace.openTextDocument(targetUri).then(doc => {
+                                        jumpToLineInDocument(doc, line);
+                                    }, (error: any) => {
+                                        vscode.window.showErrorMessage(`Could not open file: ${message.filePath}`);
+                                        console.error('Error opening file:', error);
+                                    });
+                                } else {
+                                    // Fallback to current document
+                                    const document = WebviewProvider.currentDocument || vscode.window.activeTextEditor?.document;
+                                    if (!document) {
+                                        vscode.window.showErrorMessage('No document found. Please open the Python file first.');
+                                        return;
+                                    }
+                                    jumpToLineInDocument(document, line);
                                 }
-
-                                // Get the full line content
-                                const lineText = document.lineAt(line).text;
-                                const lineLength = lineText.length;
-
-                                // Create a range that covers the entire line
-                                const range = new vscode.Range(line, 0, line, lineLength);
-
-                                // Ensure the document is visible by opening it
-                                vscode.window.showTextDocument(document, {
-                                    viewColumn: vscode.ViewColumn.One,
-                                    preserveFocus: false,
-                                    preview: false
-                                }).then(editor => {
-                                    // Wait a moment for the editor to be ready
-                                    setTimeout(() => {
-                                        // Reveal the line in center and select it
-                                        editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-                                        editor.selection = new vscode.Selection(line, 0, line, lineLength);
-
-                                        // Create blinking decoration
-                                        const decoration = vscode.window.createTextEditorDecorationType({
-                                            backgroundColor: '#FFD700', // Bright yellow background
-                                            border: '3px solid #FF6B6B', // Red border
-                                            borderRadius: '5px',
-                                            fontWeight: 'bold',
-                                            opacity: '0.9'
-                                        });
-
-                                        let blinkCount = 0;
-                                        const maxBlinks = 8; // 4 seconds with 500ms intervals = 8 blinks
-                                        const blinkInterval = 500; // 500ms between blinks
-
-                                        // Blinking function
-                                        const blink = () => {
-                                            if (blinkCount % 2 === 0) {
-                                                // Show decoration
-                                                editor.setDecorations(decoration, [range]);
-                                            } else {
-                                                // Hide decoration
-                                                editor.setDecorations(decoration, []);
-                                            }
-                                            blinkCount++;
-
-                                            if (blinkCount < maxBlinks) {
-                                                setTimeout(blink, blinkInterval);
-                                            } else {
-                                                // Final cleanup - remove decoration completely
-                                                decoration.dispose();
-                                            }
-                                        };
-
-                                        // Start blinking
-                                        blink();
-
-                                        // Show a prominent message to confirm the jump
-                                        vscode.window.showInformationMessage(
-                                            `🎯 Jumped to line ${message.lineNumber}: ${lineText.trim()}`,
-                                            { modal: false }
-                                        );
-                                    }, 100);
-                                });
-
-                            } else {
-                                console.warn('Cannot jump to code - no line number');
-                                vscode.window.showErrorMessage('Cannot jump to code: No line number available');
                             }
-                            return;
+                            break;
                     }
                 },
                 undefined,
                 context.subscriptions
             );
 
-            // Reset when the current panel is closed
-            panel.onDidDispose(
-                () => {
-                    WebviewProvider.currentPanel = undefined;
-                    WebviewProvider.currentDocument = undefined;
-                },
-                null,
-                context.subscriptions
-            );
+            panel.onDidDispose(() => {
+                WebviewProvider.currentPanel = undefined;
+            }, null, context.subscriptions);
         }
     }
 
     /**
-     * Generate HTML content for the webview
+     * Generate webview HTML content
      */
     private static getWebviewContent(graphData: GraphStructure): string {
-        // Convert graph data to Cytoscape format
-        const cytoscapeElements = this.convertToCytoscapeFormat(graphData);
+        const cytoscapeData = this.convertToCytoscapeFormat(graphData);
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -453,7 +434,7 @@ export class WebviewProvider {
     <div id="header">
         <div style="display: flex; align-items: center; gap: 15px;">
             <h1>LangGraph Visualization</h1>
-            <span class="graph-type-badge">${this.escapeHtml(graphData.graphType)}</span>
+            <span class="graph-type-badge">${graphData.graphType}</span>
         </div>
         <div id="controls">
             <div class="search-box">
@@ -468,11 +449,15 @@ export class WebviewProvider {
             <div id="stats">
                 <div class="stat">
                     <span>Nodes:</span>
-                    <span class="stat-value">${graphData.nodes.length}</span>
+                    <span class="stat-value" id="nodeCount">0</span>
                 </div>
                 <div class="stat">
                     <span>Edges:</span>
-                    <span class="stat-value">${graphData.edges.length}</span>
+                    <span class="stat-value" id="edgeCount">0</span>
+                </div>
+                <div class="stat">
+                    <span>Files:</span>
+                    <span class="stat-value" id="fileCount">1</span>
                 </div>
             </div>
         </div>
@@ -517,8 +502,8 @@ export class WebviewProvider {
                 <span class="info-value" id="nodeInfoLine">-</span>
             </div>
             <div class="info-row">
-                <span class="info-label">Type:</span>
-                <span class="info-value" id="nodeInfoType">-</span>
+                <span class="info-label">File:</span>
+                <span class="info-value" id="nodeInfoFile">-</span>
             </div>
             <button class="jump-button" id="jumpToCodeBtn">Jump to Code</button>
         </div>
@@ -531,7 +516,6 @@ export class WebviewProvider {
             </div>
         </div>
         
-        
         <div class="zoom-controls">
             <button class="zoom-button" id="zoomInBtn" title="Zoom In">+</button>
             <button class="zoom-button" id="zoomOutBtn" title="Zoom Out">−</button>
@@ -542,9 +526,8 @@ export class WebviewProvider {
     <script>
         const vscode = acquireVsCodeApi();
         
-        
         // Graph data
-        const graphData = ${JSON.stringify(cytoscapeElements)};
+        const cytoscapeElements = ${JSON.stringify(cytoscapeData)};
         
         // Check if Cytoscape is loaded
         if (typeof cytoscape === 'undefined') {
@@ -560,7 +543,7 @@ export class WebviewProvider {
         // Fallback visualization function
         function showFallbackVisualization() {
             const cyContainer = document.getElementById('cy');
-            const nodesHtml = graphData.nodes.map(node => 
+            const nodesHtml = cytoscapeElements.nodes.map(node => 
                 '<div style="margin: 5px; padding: 5px; border: 1px solid #ccc; border-radius: 3px; display: inline-block; margin: 2px;">' +
                 '<span style="background-color: ' + (node.data.type === 'start' ? '#4CAF50' : node.data.type === 'end' ? '#F44336' : '#2196F3') + '; color: white; padding: 2px 6px; border-radius: 2px; font-size: 12px;">' + node.data.type.toUpperCase() + '</span> ' +
                 node.data.label + 
@@ -568,7 +551,7 @@ export class WebviewProvider {
                 '</div>'
             ).join('');
             
-            const edgesHtml = graphData.edges.map(edge => 
+            const edgesHtml = cytoscapeElements.edges.map(edge => 
                 '<div style="margin: 5px; padding: 5px; border: 1px solid #ddd; border-radius: 3px; display: inline-block; margin: 2px;">' +
                 edge.data.source + ' → ' + edge.data.target +
                 (edge.data.label ? '<br><small>Label: ' + edge.data.label + '</small>' : '') +
@@ -578,11 +561,11 @@ export class WebviewProvider {
             cyContainer.innerHTML = '<div style="padding: 20px; text-align: center;">' +
                 '<h3>Fallback Visualization</h3>' +
                 '<div style="margin: 20px 0;">' +
-                '<strong>Nodes (' + graphData.nodes.length + '):</strong><br>' +
+                '<strong>Nodes (' + cytoscapeElements.nodes.length + '):</strong><br>' +
                 nodesHtml +
                 '</div>' +
                 '<div style="margin: 20px 0;">' +
-                '<strong>Edges (' + graphData.edges.length + '):</strong><br>' +
+                '<strong>Edges (' + cytoscapeElements.edges.length + '):</strong><br>' +
                 edgesHtml +
                 '</div>' +
                 '</div>';
@@ -593,7 +576,7 @@ export class WebviewProvider {
         try {
             cy = cytoscape({
             container: document.getElementById('cy'),
-            elements: graphData,
+            elements: cytoscapeElements,
             style: [
                 {
                     selector: 'node',
@@ -627,6 +610,15 @@ export class WebviewProvider {
                     style: {
                         'background-color': '#F44336',
                         'border-color': '#C62828'
+                    }
+                },
+                {
+                    selector: 'node[type="subgraph"]',
+                    style: {
+                        'background-color': '#e3f2fd',
+                        'border-color': '#2196f3',
+                        'border-width': '3px',
+                        'border-style': 'dashed'
                     }
                 },
                 {
@@ -715,7 +707,7 @@ export class WebviewProvider {
         }
         
         // Check if graph is empty
-        if (graphData.nodes.length === 0) {
+        if (cytoscapeElements.nodes.length === 0) {
             document.getElementById('helpText').innerHTML = 
                 '<div class="help-icon">📝</div>' +
                 '<div><strong>No Graph Data</strong><br>No nodes or edges were detected in the current file.</div>';
@@ -745,7 +737,7 @@ export class WebviewProvider {
             document.getElementById('nodeInfoBadge').className = 'node-badge ' + selectedNodeData.type;
             document.getElementById('nodeInfoFunction').textContent = selectedNodeData.functionName || '-';
             document.getElementById('nodeInfoLine').textContent = selectedNodeData.lineNumber || '-';
-            document.getElementById('nodeInfoType').textContent = selectedNodeData.type;
+            document.getElementById('nodeInfoFile').textContent = selectedNodeData.filePath ? selectedNodeData.filePath.split('/').pop() : '-';
             document.getElementById('nodeInfo').classList.add('visible');
         });
         
@@ -774,22 +766,26 @@ export class WebviewProvider {
             setTimeout(() => {
             if (selectedNodeData) {
                 const lineNumber = selectedNodeData.lineNumber;
+                const filePath = selectedNodeData.filePath;
                 
                 if (lineNumber) {
                     vscode.postMessage({
                         command: 'jumpToCode',
-                        lineNumber: lineNumber
+                        lineNumber: lineNumber,
+                        filePath: filePath
                     });
                 } else {
                     alert('No line number available for this node');
                 }
             } else if (selectedNode) {
                 const lineNumber = selectedNode.data('lineNumber');
+                const filePath = selectedNode.data('filePath');
                 
                 if (lineNumber) {
                     vscode.postMessage({
                         command: 'jumpToCode',
-                        lineNumber: lineNumber
+                        lineNumber: lineNumber,
+                        filePath: filePath
                     });
                 } else {
                     alert('No line number available for this node');
@@ -911,6 +907,26 @@ export class WebviewProvider {
             cy.on('mouseout', 'node', function(evt) {
                 document.body.style.cursor = 'default';
             });
+            
+            // Update statistics
+            function updateStats() {
+                document.getElementById('nodeCount').textContent = cy.nodes().length;
+                document.getElementById('edgeCount').textContent = cy.edges().length;
+                
+                // Count unique files
+                const files = new Set();
+                cy.nodes().forEach(node => {
+                    if (node.data('filePath')) {
+                        files.add(node.data('filePath'));
+                    }
+                });
+                document.getElementById('fileCount').textContent = files.size;
+            }
+
+            // Initial stats update
+            cy.ready(() => {
+                updateStats();
+            });
         }
         
     </script>
@@ -918,55 +934,87 @@ export class WebviewProvider {
 </html>`;
     }
 
-    /*
-     * Convert GraphStructure to Cytoscape format
+    /**
+     * Convert graph structure to Cytoscape format with flattened subgraphs
      */
     private static convertToCytoscapeFormat(graphData: GraphStructure): any {
-        const elements: any = {
-            nodes: [],
-            edges: []
-        };
+        const nodes: any[] = [];
+        const edges: any[] = [];
 
-        // Add nodes
-        for (const node of graphData.nodes) {
-            elements.nodes.push({
+        // Add all nodes from main graph and subgraphs
+        this.processGraphRecursively(graphData, nodes, edges, '');
+
+        return { nodes, edges };
+    }
+
+    /**
+     * Recursively process graph and subgraphs to create flat structure
+     */
+    private static processGraphRecursively(
+        graph: GraphStructure,
+        nodes: any[],
+        edges: any[],
+        prefix: string
+    ): void {
+        // Add main graph nodes
+        graph.nodes.forEach(node => {
+            const nodeId = prefix + node.id;
+            nodes.push({
                 data: {
-                    id: node.id,
+                    id: nodeId,
                     label: node.label,
                     type: node.type,
                     functionName: node.functionName,
-                    lineNumber: node.lineNumber
+                    lineNumber: node.lineNumber,
+                    filePath: node.filePath || graph.filePath
                 }
             });
-        }
 
-        // Add edges
-        for (const edge of graphData.edges) {
-            elements.edges.push({
+            // If node has subgraph, add subgraph nodes with prefix
+            if (node.subgraph) {
+                // Ensure subgraph nodes inherit the correct file path
+                const subgraphWithFilePath = {
+                    ...node.subgraph,
+                    filePath: node.subgraph.filePath || node.filePath
+                };
+                this.processGraphRecursively(subgraphWithFilePath, nodes, edges, nodeId + '_');
+            }
+        });
+
+        // Add main graph edges
+        graph.edges.forEach(edge => {
+            const sourceId = prefix + edge.from;
+            const targetId = prefix + edge.to;
+
+            edges.push({
                 data: {
-                    id: `${edge.from}-${edge.to}`,
-                    source: edge.from,
-                    target: edge.to,
+                    id: prefix + edge.from + '_to_' + edge.to,
+                    source: sourceId,
+                    target: targetId,
                     type: edge.type,
                     label: edge.label
                 }
             });
-        }
+        });
 
-        return elements;
-    }
+        // Add subgraph edges
+        graph.nodes.forEach(node => {
+            if (node.subgraph) {
+                node.subgraph.edges.forEach(subEdge => {
+                    const sourceId = prefix + node.id + '_' + subEdge.from;
+                    const targetId = prefix + node.id + '_' + subEdge.to;
 
-    /**
-     * Escape HTML special characters
-     */
-    private static escapeHtml(text: string): string {
-        const map: { [key: string]: string } = {
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#039;'
-        };
-        return text.replace(/[&<>"']/g, m => map[m]);
+                    edges.push({
+                        data: {
+                            id: prefix + node.id + '_' + subEdge.from + '_to_' + subEdge.to,
+                            source: sourceId,
+                            target: targetId,
+                            type: subEdge.type,
+                            label: subEdge.label
+                        }
+                    });
+                });
+            }
+        });
     }
 }

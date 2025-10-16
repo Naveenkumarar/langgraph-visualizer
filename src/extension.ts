@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { GraphDetector } from './graphDetector';
 import { GraphParser } from './graphParser';
 import { WebviewProvider } from './webviewProvider';
+import { FileTraverser } from './fileTraverser';
 
 let statusBarItem: vscode.StatusBarItem;
 
@@ -20,7 +21,7 @@ export function activate(context: vscode.ExtensionContext) {
     // Register the show graph command
     const showGraphCommand = vscode.commands.registerCommand(
         'langgraph-visualizer.showGraph',
-        () => {
+        async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
                 vscode.window.showErrorMessage('No active editor found');
@@ -35,11 +36,40 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            // Parse the graph structure
-            const graphData = GraphParser.parseDocument(document);
+            try {
+                // Show loading message
+                vscode.window.showInformationMessage('🔍 Analyzing graph structure...');
 
-            // Show the visualization
-            WebviewProvider.show(context, graphData, document);
+                // Get workspace root
+                const workspaceRoot = vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath;
+                if (!workspaceRoot) {
+                    vscode.window.showErrorMessage('No workspace root found');
+                    return;
+                }
+
+                // Create file traverser and build complete graph hierarchy
+                const fileTraverser = new FileTraverser(workspaceRoot);
+                const graphData = await fileTraverser.buildGraphHierarchy(document.fileName);
+
+                if (graphData.nodes.length === 0) {
+                    vscode.window.showInformationMessage('No graph structure found in this file or its dependencies');
+                    return;
+                }
+
+                // Show the complete graph hierarchy in webview
+                WebviewProvider.show(context, graphData, document);
+
+                // Show success message with stats
+                const totalNodes = countTotalNodes(graphData);
+                const totalFiles = countTotalFiles(graphData);
+                vscode.window.showInformationMessage(
+                    `✅ Graph loaded: ${totalNodes} nodes across ${totalFiles} files`
+                );
+
+            } catch (error) {
+                console.error('Error in showGraph command:', error);
+                vscode.window.showErrorMessage(`Failed to analyze graph: ${error}`);
+            }
         }
     );
     context.subscriptions.push(showGraphCommand);
@@ -80,6 +110,69 @@ function updateStatusBar(editor: vscode.TextEditor | undefined): void {
         statusBarItem.show();
     } else {
         statusBarItem.hide();
+    }
+}
+
+/**
+ * Count total nodes in a graph structure including subgraphs
+ */
+function countTotalNodes(graph: any): number {
+    let count = graph.nodes.length;
+    if (graph.subgraphs) {
+        for (const subgraph of graph.subgraphs) {
+            count += countTotalNodes(subgraph);
+        }
+    }
+    for (const node of graph.nodes) {
+        if (node.subgraph) {
+            count += countTotalNodes(node.subgraph);
+        }
+    }
+    return count;
+}
+
+/**
+ * Count total files in a graph structure
+ */
+function countTotalFiles(graph: any): number {
+    const files = new Set<string>();
+    if (graph.filePath) {
+        files.add(graph.filePath);
+    }
+    if (graph.subgraphs) {
+        for (const subgraph of graph.subgraphs) {
+            countTotalFilesRecursive(subgraph, files);
+        }
+    }
+    for (const node of graph.nodes) {
+        if (node.filePath) {
+            files.add(node.filePath);
+        }
+        if (node.subgraph) {
+            countTotalFilesRecursive(node.subgraph, files);
+        }
+    }
+    return files.size;
+}
+
+function countTotalFilesRecursive(graph: any, files: Set<string>): void {
+    if (graph.filePath) {
+        files.add(graph.filePath);
+    }
+    if (graph.subgraphs) {
+        for (const subgraph of graph.subgraphs) {
+            countTotalFilesRecursive(subgraph, files);
+        }
+    }
+    if (graph.nodes) {
+        for (const node of graph.nodes) {
+            if (node.filePath) {
+                files.add(node.filePath);
+            }
+            if (node.subgraph) {
+                countTotalFilesRecursive(node.subgraph, files);
+            }
+        }
     }
 }
 
