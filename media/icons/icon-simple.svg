@@ -1,0 +1,45 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- Gradient background -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0078d4;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#005a9e;stop-opacity:1" />
+    </linearGradient>
+    
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <polygon points="0 0, 8 4, 0 8" fill="#ffffff" />
+    </marker>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="128" height="128" rx="20" fill="url(#bgGradient)"/>
+  
+  <!-- Main graph structure -->
+  <!-- Start node -->
+  <circle cx="64" cy="30" r="10" fill="#4ec9b0" stroke="#ffffff" stroke-width="2.5"/>
+  
+  <!-- Middle layer - 3 nodes -->
+  <circle cx="32" cy="64" r="10" fill="#c586c0" stroke="#ffffff" stroke-width="2.5"/>
+  <circle cx="64" cy="64" r="10" fill="#c586c0" stroke="#ffffff" stroke-width="2.5"/>
+  <circle cx="96" cy="64" r="10" fill="#c586c0" stroke="#ffffff" stroke-width="2.5"/>
+  
+  <!-- End node -->
+  <circle cx="64" cy="98" r="10" fill="#f48771" stroke="#ffffff" stroke-width="2.5"/>
+  
+  <!-- Connections -->
+  <line x1="64" y1="40" x2="32" y2="54" stroke="#ffffff" stroke-width="2.5" stroke-opacity="0.8" marker-end="url(#arrow)"/>
+  <line x1="64" y1="40" x2="64" y2="54" stroke="#ffffff" stroke-width="2.5" stroke-opacity="0.8" marker-end="url(#arrow)"/>
+  <line x1="64" y1="40" x2="96" y2="54" stroke="#ffffff" stroke-width="2.5" stroke-opacity="0.8" marker-end="url(#arrow)"/>
+  
+  <line x1="32" y1="74" x2="64" y2="88" stroke="#ffffff" stroke-width="2.5" stroke-opacity="0.8" marker-end="url(#arrow)"/>
+  <line x1="64" y1="74" x2="64" y2="88" stroke="#ffffff" stroke-width="2.5" stroke-opacity="0.8" marker-end="url(#arrow)"/>
+  <line x1="96" y1="74" x2="64" y2="88" stroke="#ffffff" stroke-width="2.5" stroke-opacity="0.8" marker-end="url(#arrow)"/>
+  
+  <!-- Small tool indicators -->
+  <circle cx="20" cy="64" r="5" fill="#ce9178" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="108" cy="64" r="5" fill="#ce9178" stroke="#ffffff" stroke-width="1.5"/>
+  
+  <!-- LangGraph text at bottom -->
+  <text x="64" y="120" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">LangGraph</text>
+</svg>
+
