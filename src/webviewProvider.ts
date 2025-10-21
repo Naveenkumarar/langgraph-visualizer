@@ -352,7 +352,7 @@ export class WebviewProvider {
         
         #legend {
             position: absolute;
-            top: 10px;
+            bottom: 60px;
             right: 10px;
             background-color: var(--vscode-editor-inactiveSelectionBackground);
             border: 1px solid var(--vscode-panel-border);
@@ -361,6 +361,191 @@ export class WebviewProvider {
             font-size: 12px;
             z-index: 1000;
             backdrop-filter: blur(10px);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        #statePanel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: var(--vscode-editor-inactiveSelectionBackground);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 1001;
+            backdrop-filter: blur(10px);
+            min-width: 250px;
+            max-width: 400px;
+            max-height: 80vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            transition: all 0.3s ease;
+        }
+
+        #statePanel.collapsed {
+            max-height: 40px;
+        }
+
+        #statePanel.hidden {
+            display: none;
+        }
+
+        .state-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            background-color: var(--vscode-editor-background);
+            border-bottom: 1px solid var(--vscode-panel-border);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .state-header:hover {
+            background-color: var(--vscode-list-hoverBackground);
+        }
+
+        .state-header h3 {
+            margin: 0;
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .state-type-badge {
+            background-color: var(--vscode-badge-background);
+            color: var(--vscode-badge-foreground);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .collapse-icon {
+            font-size: 16px;
+            transition: transform 0.3s ease;
+        }
+
+        #statePanel.collapsed .collapse-icon {
+            transform: rotate(-90deg);
+        }
+
+        .state-content {
+            padding: 12px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        #statePanel.collapsed .state-content {
+            display: none;
+        }
+
+        .state-field {
+            margin: 8px 0;
+            padding: 8px;
+            background-color: var(--vscode-editor-background);
+            border-radius: 3px;
+            border-left: 3px solid var(--vscode-button-background);
+        }
+
+        .state-field-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 4px;
+        }
+
+        .state-field-name {
+            font-weight: 600;
+            color: var(--vscode-foreground);
+            font-size: 12px;
+            font-family: var(--vscode-editor-font-family);
+        }
+
+        .state-field-type {
+            color: var(--vscode-descriptionForeground);
+            font-size: 11px;
+            font-family: var(--vscode-editor-font-family);
+            font-style: italic;
+        }
+
+        .state-field-value {
+            color: var(--vscode-textLink-foreground);
+            font-size: 11px;
+            margin-top: 4px;
+            padding: 4px 6px;
+            background-color: var(--vscode-input-background);
+            border-radius: 2px;
+            font-family: var(--vscode-editor-font-family);
+            border: 1px solid var(--vscode-input-border);
+            word-break: break-all;
+        }
+
+        .state-field-annotation {
+            color: var(--vscode-editorWarning-foreground);
+            font-size: 10px;
+            margin-top: 4px;
+            font-family: var(--vscode-editor-font-family);
+        }
+
+        .copy-state-btn {
+            background-color: transparent;
+            color: var(--vscode-foreground);
+            border: none;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-size: 14px;
+            border-radius: 3px;
+            transition: background-color 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .copy-state-btn:hover {
+            background-color: var(--vscode-list-hoverBackground);
+        }
+
+        .copy-state-btn:active {
+            transform: scale(0.95);
+        }
+
+        .copy-toast {
+            position: fixed;
+            bottom: 80px;
+            right: 20px;
+            background-color: var(--vscode-notifications-background);
+            color: var(--vscode-notifications-foreground);
+            border: 1px solid var(--vscode-notifications-border);
+            padding: 10px 16px;
+            border-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            display: none;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            z-index: 10000;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .copy-toast.show {
+            display: flex;
+        }
+
+        .copy-toast-icon {
+            color: var(--vscode-notificationsInfoIcon-foreground);
+        }
+
+        .no-state-message {
+            color: var(--vscode-descriptionForeground);
+            font-style: italic;
+            text-align: center;
+            padding: 20px;
         }
         
         #legend h3 {
@@ -639,6 +824,42 @@ export class WebviewProvider {
     </div>
     
     <div id="cy">
+        <div id="statePanel" class="${graphData.state && graphData.state.length > 0 ? '' : 'hidden'}">
+            <div class="state-header" id="statePanelHeader">
+                <h3>
+                    <span>State</span>
+                    ${graphData.stateType ? '<span class="state-type-badge">' + graphData.stateType + '</span>' : ''}
+                </h3>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <button class="copy-state-btn" id="copyStateBtn" title="Copy state JSON to clipboard">
+                        📋
+                    </button>
+                    <span class="collapse-icon">▼</span>
+                </div>
+            </div>
+            <div class="state-content">
+                ${graphData.state && graphData.state.length > 0 ?
+                graphData.state.map(field => {
+                    const exampleValue = this.getExampleValue(field);
+                    return `
+                        <div class="state-field" data-field-name="${field.name}" data-field-type="${field.type}">
+                            <div class="state-field-header">
+                                <div class="state-field-name">${field.name}</div>
+                            </div>
+                            <div class="state-field-type">${field.type}</div>
+                            ${field.defaultValue ?
+                            '<div class="state-field-value">' + field.defaultValue + '</div>' :
+                            '<div class="state-field-value">' + exampleValue + '</div>'
+                        }
+                            ${field.annotation ? '<div class="state-field-annotation">⚙️ ' + field.annotation + '</div>' : ''}
+                        </div>
+                    `;
+                }).join('')
+                : '<div class="no-state-message">No state fields defined</div>'
+            }
+            </div>
+        </div>
+        
         <div id="legend">
             <h3>Legend</h3>
             <div class="legend-item">
@@ -1370,6 +1591,82 @@ export class WebviewProvider {
                 updateStats();
             });
         }
+
+        // State panel collapse/expand functionality
+        const statePanel = document.getElementById('statePanel');
+        const statePanelHeader = document.getElementById('statePanelHeader');
+        
+        if (statePanel && statePanelHeader) {
+            statePanelHeader.addEventListener('click', (e) => {
+                // Don't collapse if clicking the copy button
+                if (e.target.id !== 'copyStateBtn' && !e.target.closest('#copyStateBtn')) {
+                    statePanel.classList.toggle('collapsed');
+                }
+            });
+        }
+
+        // Copy state to clipboard functionality
+        const copyStateBtn = document.getElementById('copyStateBtn');
+        const copyToast = document.getElementById('copyToast');
+        
+        if (copyStateBtn) {
+            copyStateBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent panel collapse
+                
+                // Collect state fields from the DOM
+                const stateFields = document.querySelectorAll('.state-field');
+                const stateObject = {};
+                
+                stateFields.forEach(field => {
+                    const name = field.getAttribute('data-field-name');
+                    const valueElement = field.querySelector('.state-field-value');
+                    
+                    if (name && valueElement) {
+                        const valueText = valueElement.textContent.trim();
+                        
+                        // Try to parse the value as JSON
+                        try {
+                            // Remove quotes for strings to get raw value
+                            if (valueText === '""') {
+                                stateObject[name] = "";
+                            } else if (valueText === 'null') {
+                                stateObject[name] = null;
+                            } else if (valueText === 'false') {
+                                stateObject[name] = false;
+                            } else if (valueText === 'true') {
+                                stateObject[name] = true;
+                            } else if (valueText === '[]') {
+                                stateObject[name] = [];
+                            } else if (valueText === '{}') {
+                                stateObject[name] = {};
+                            } else if (!isNaN(valueText) && valueText !== '') {
+                                stateObject[name] = Number(valueText);
+                            } else {
+                                stateObject[name] = valueText;
+                            }
+                        } catch (error) {
+                            stateObject[name] = valueText;
+                        }
+                    }
+                });
+                
+                // Copy to clipboard
+                const stateJSON = JSON.stringify(stateObject, null, 2);
+                
+                navigator.clipboard.writeText(stateJSON).then(() => {
+                    // Show success toast
+                    if (copyToast) {
+                        copyToast.classList.add('show');
+                        setTimeout(() => {
+                            copyToast.classList.remove('show');
+                        }, 2000);
+                    }
+                }).catch(err => {
+                    console.error('Failed to copy state:', err);
+                    alert('Failed to copy state to clipboard');
+                });
+            });
+        }
         
     </script>
     
@@ -1380,6 +1677,12 @@ export class WebviewProvider {
             <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/>
         </svg>
         <span>Graph reloading...</span>
+    </div>
+
+    <!-- Copy state toast notification -->
+    <div id="copyToast" class="copy-toast">
+        <span class="copy-toast-icon">✓</span>
+        <span>State JSON copied to clipboard!</span>
     </div>
     
 </body>
@@ -1514,6 +1817,41 @@ export class WebviewProvider {
                 });
             }
         });
+    }
+
+    /**
+     * Get example value based on field type
+     */
+    private static getExampleValue(field: any): string {
+        const type = field.type.toLowerCase();
+
+        // Handle default values
+        if (field.defaultValue) {
+            return field.defaultValue;
+        }
+
+        // Generate example values based on type
+        if (type.includes('str')) {
+            return '""';
+        } else if (type.includes('int')) {
+            return '0';
+        } else if (type.includes('float')) {
+            return '0.0';
+        } else if (type.includes('bool')) {
+            return 'false';
+        } else if (type.includes('list') || type.includes('sequence')) {
+            return '[]';
+        } else if (type.includes('dict') || type.includes('mapping')) {
+            return '{}';
+        } else if (type.includes('tuple')) {
+            return '()';
+        } else if (type.includes('set')) {
+            return 'set()';
+        } else if (type.includes('none')) {
+            return 'null';
+        } else {
+            return 'null';
+        }
     }
 
     /**

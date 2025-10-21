@@ -21,6 +21,13 @@ export interface GraphEdge {
     label?: string;
 }
 
+export interface StateField {
+    name: string;
+    type: string;
+    defaultValue?: string;
+    annotation?: string;
+}
+
 export interface GraphStructure {
     nodes: GraphNode[];
     edges: GraphEdge[];
@@ -30,6 +37,8 @@ export interface GraphStructure {
     subgraphs?: GraphStructure[]; // NEW: Nested subgraphs
     parentGraph?: string;        // NEW: Parent graph ID if this is a subgraph
     level?: number;              // NEW: Nesting level (0 = root, 1 = first level subgraph, etc.)
+    state?: StateField[];        // NEW: State definition fields
+    stateType?: string;          // NEW: Type of state definition (TypedDict, dataclass, State, etc.)
 }
 
 /**
@@ -51,11 +60,14 @@ export class GraphParser {
         const nodes = this.extractNodes(text);
         const edges = this.extractEdges(text, nodes); // Pass nodes to create agent-tool edges
         const graphType = this.detectGraphType(text);
+        const stateInfo = this.extractStateDefinition(text);
 
         return {
             nodes,
             edges,
-            graphType
+            graphType,
+            state: stateInfo.fields,
+            stateType: stateInfo.type
         };
     }
 
@@ -686,6 +698,166 @@ export class GraphParser {
      */
     private static getLineNumber(text: string, index: number): number {
         return text.substring(0, index).split('\n').length;
+    }
+
+    /**
+     * Extract state definition from the code
+     */
+    private static extractStateDefinition(text: string): { fields: StateField[], type: string } {
+        const fields: StateField[] = [];
+        let stateType = 'Unknown';
+
+        // Pattern 1: TypedDict state definition
+        // e.g., class State(TypedDict):
+        //           messages: list[str]
+        //           user: str
+        const typedDictPattern = /class\s+(\w+)\s*\(TypedDict\):\s*([\s\S]*?)(?=\n(?:class|\ndef|$))/g;
+        let match = typedDictPattern.exec(text);
+
+        if (match) {
+            stateType = 'TypedDict';
+            const stateClassName = match[1];
+            const classBody = match[2];
+
+            console.log(`LangGraph Parser - Found TypedDict state: ${stateClassName}`);
+
+            // Extract field definitions: field_name: type
+            const fieldPattern = /^\s+(\w+)\s*:\s*([^\n#]+)/gm;
+            let fieldMatch;
+
+            while ((fieldMatch = fieldPattern.exec(classBody)) !== null) {
+                const fieldName = fieldMatch[1];
+                const fieldType = fieldMatch[2].trim();
+
+                console.log(`LangGraph Parser - State field: ${fieldName}: ${fieldType}`);
+
+                fields.push({
+                    name: fieldName,
+                    type: fieldType
+                });
+            }
+        }
+
+        // Pattern 2: @dataclass state definition
+        // e.g., @dataclass
+        //       class State:
+        //           messages: list = field(default_factory=list)
+        const dataclassPattern = /@dataclass[\s\S]*?class\s+(\w+)(?:\([^)]*\))?:\s*([\s\S]*?)(?=\n(?:@|class|\ndef|$))/g;
+        match = dataclassPattern.exec(text);
+
+        if (match) {
+            stateType = 'dataclass';
+            const stateClassName = match[1];
+            const classBody = match[2];
+
+            console.log(`LangGraph Parser - Found dataclass state: ${stateClassName}`);
+
+            // Extract field definitions with optional defaults
+            // Pattern: field_name: type = default_value
+            // Or: field_name: type
+            const fieldPattern = /^\s+(\w+)\s*:\s*([^=\n]+)(?:\s*=\s*([^\n]+))?/gm;
+            let fieldMatch;
+
+            while ((fieldMatch = fieldPattern.exec(classBody)) !== null) {
+                const fieldName = fieldMatch[1];
+                const fieldType = fieldMatch[2].trim();
+                const defaultValue = fieldMatch[3] ? fieldMatch[3].trim() : undefined;
+
+                console.log(`LangGraph Parser - State field: ${fieldName}: ${fieldType}${defaultValue ? ` = ${defaultValue}` : ''}`);
+
+                fields.push({
+                    name: fieldName,
+                    type: fieldType,
+                    defaultValue: defaultValue
+                });
+            }
+        }
+
+        // Pattern 3: Annotated state with add_messages
+        // e.g., class State(TypedDict):
+        //           messages: Annotated[list, add_messages]
+        const annotatedPattern = /class\s+(\w+)\s*\((?:TypedDict|MessagesState)\):\s*([\s\S]*?)(?=\n(?:class|\ndef|$))/g;
+        match = annotatedPattern.exec(text);
+
+        if (match && fields.length === 0) {
+            stateType = match[0].includes('MessagesState') ? 'MessagesState' : 'TypedDict';
+            const stateClassName = match[1];
+            const classBody = match[2];
+
+            console.log(`LangGraph Parser - Found annotated state: ${stateClassName}`);
+
+            // Extract Annotated fields
+            const annotatedFieldPattern = /^\s+(\w+)\s*:\s*Annotated\[([^\]]+)\]/gm;
+            let fieldMatch;
+
+            while ((fieldMatch = annotatedFieldPattern.exec(classBody)) !== null) {
+                const fieldName = fieldMatch[1];
+                const annotationContent = fieldMatch[2].trim();
+                const [fieldType, ...annotations] = annotationContent.split(',').map(s => s.trim());
+
+                console.log(`LangGraph Parser - Annotated field: ${fieldName}: ${fieldType} [${annotations.join(', ')}]`);
+
+                fields.push({
+                    name: fieldName,
+                    type: fieldType,
+                    annotation: annotations.join(', ')
+                });
+            }
+        }
+
+        // Pattern 4: Direct StateGraph with state type parameter
+        // e.g., StateGraph(MessagesState) or StateGraph(State)
+        const stateGraphPattern = /StateGraph\s*\(\s*(\w+)\s*\)/g;
+        match = stateGraphPattern.exec(text);
+
+        if (match && fields.length === 0) {
+            const stateClassName = match[1];
+            console.log(`LangGraph Parser - Found StateGraph with state type: ${stateClassName}`);
+
+            // Try to find the state class definition elsewhere in the file
+            const stateClassPattern = new RegExp(`class\\s+${stateClassName}\\s*(?:\\([^)]*\\))?:\\s*([\\s\\S]*?)(?=\\n(?:class|\\ndef|$))`, 'g');
+            const classMatch = stateClassPattern.exec(text);
+
+            if (classMatch) {
+                const classBody = classMatch[1];
+
+                // Try to extract fields
+                const fieldPattern = /^\s+(\w+)\s*:\s*([^\n#]+?)(?:\s*=\s*([^\n]+))?$/gm;
+                let fieldMatch;
+
+                while ((fieldMatch = fieldPattern.exec(classBody)) !== null) {
+                    const fieldName = fieldMatch[1];
+                    const fieldType = fieldMatch[2].trim();
+                    const defaultValue = fieldMatch[3] ? fieldMatch[3].trim() : undefined;
+
+                    fields.push({
+                        name: fieldName,
+                        type: fieldType,
+                        defaultValue: defaultValue
+                    });
+                }
+
+                // Detect state type from class definition
+                if (classBody.includes('TypedDict')) {
+                    stateType = 'TypedDict';
+                } else if (text.includes('@dataclass') && text.indexOf('@dataclass') < text.indexOf(`class ${stateClassName}`)) {
+                    stateType = 'dataclass';
+                } else if (classBody.includes('Annotated')) {
+                    stateType = 'Annotated State';
+                } else {
+                    stateType = 'State Class';
+                }
+            }
+        }
+
+        // If no state found, return empty
+        if (fields.length === 0) {
+            console.log('LangGraph Parser - No state definition found');
+        } else {
+            console.log(`LangGraph Parser - Extracted ${fields.length} state fields (type: ${stateType})`);
+        }
+
+        return { fields, type: stateType };
     }
 }
 
