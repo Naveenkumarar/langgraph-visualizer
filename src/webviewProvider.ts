@@ -300,6 +300,14 @@ export class WebviewProvider {
         .legend-color.start { background-color: #4CAF50; }
         .legend-color.node { background-color: #2196F3; }
         .legend-color.end { background-color: #F44336; }
+        .legend-color.tool { 
+            background-color: #9C27B0;
+            clip-path: polygon(30% 0%, 70% 0%, 100% 50%, 70% 100%, 30% 100%, 0% 50%);
+        }
+        .legend-color.agent { 
+            background-color: #FF9800;
+            transform: rotate(45deg);
+        }
         .legend-color.direct { 
             width: 30px;
             height: 3px;
@@ -310,6 +318,12 @@ export class WebviewProvider {
             width: 30px;
             height: 3px;
             background-color: #FF9800;
+            border: none;
+        }
+        .legend-color.bidirectional { 
+            width: 30px;
+            height: 3px;
+            background-color: #9C27B0;
             border: none;
         }
         .legend-color.subgraph-entry { 
@@ -377,6 +391,8 @@ export class WebviewProvider {
         .node-badge.start { background-color: #4CAF50; color: white; }
         .node-badge.node { background-color: #2196F3; color: white; }
         .node-badge.end { background-color: #F44336; color: white; }
+        .node-badge.tool { background-color: #9C27B0; color: white; }
+        .node-badge.agent { background-color: #FF9800; color: white; }
         
         .info-row {
             margin: 5px 0;
@@ -505,12 +521,24 @@ export class WebviewProvider {
                 <span>End Node</span>
             </div>
             <div class="legend-item">
+                <div class="legend-color tool"></div>
+                <span>Tool Node</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color agent"></div>
+                <span>Agent Node</span>
+            </div>
+            <div class="legend-item">
                 <div class="legend-color direct"></div>
                 <span>Direct Edge</span>
             </div>
             <div class="legend-item">
                 <div class="legend-color conditional"></div>
                 <span>Conditional Edge</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color bidirectional"></div>
+                <span>Agent-Tool Edge</span>
             </div>
             <div class="legend-item">
                 <div class="legend-color subgraph-entry"></div>
@@ -546,6 +574,10 @@ export class WebviewProvider {
             <div class="info-row">
                 <span class="info-label">File:</span>
                 <span class="info-value" id="nodeInfoFile">-</span>
+            </div>
+            <div class="info-row" id="nodeInfoToolsRow" style="display: none;">
+                <span class="info-label">Tools:</span>
+                <span class="info-value" id="nodeInfoTools">-</span>
             </div>
             <button class="jump-button" id="jumpToCodeBtn">Jump to Code</button>
         </div>
@@ -655,6 +687,22 @@ export class WebviewProvider {
                     }
                 },
                 {
+                    selector: 'node[type="tool"]',
+                    style: {
+                        'background-color': '#9C27B0',
+                        'border-color': '#6A1B9A',
+                        'shape': 'hexagon'
+                    }
+                },
+                {
+                    selector: 'node[type="agent"]',
+                    style: {
+                        'background-color': '#FF9800',
+                        'border-color': '#E65100',
+                        'shape': 'diamond'
+                    }
+                },
+                {
                     selector: 'node[type="subgraph"]',
                     style: {
                         'background-color': '#e3f2fd',
@@ -698,6 +746,23 @@ export class WebviewProvider {
                         'line-color': '#FF9800',
                         'target-arrow-color': '#FF9800',
                         'line-style': 'dashed'
+                    }
+                },
+                {
+                    selector: 'edge[type="bidirectional"]',
+                    style: {
+                        'line-color': '#9C27B0',
+                        'target-arrow-color': '#9C27B0',
+                        'source-arrow-color': '#9C27B0',
+                        'source-arrow-shape': 'triangle',
+                        'target-arrow-shape': 'triangle',
+                        'arrow-scale': 1.0,
+                        'curve-style': 'bezier',
+                        'label': 'data(label)',
+                        'text-rotation': 'autorotate',
+                        'font-size': '10px',
+                        'color': '#9C27B0',
+                        'text-margin-y': -10
                     }
                 },
                 {
@@ -943,6 +1008,20 @@ export class WebviewProvider {
             document.getElementById('nodeInfoFunction').textContent = selectedNodeData.functionName || '-';
             document.getElementById('nodeInfoLine').textContent = selectedNodeData.lineNumber || '-';
             document.getElementById('nodeInfoFile').textContent = selectedNodeData.filePath ? selectedNodeData.filePath.split('/').pop() : '-';
+            
+            // Show tools information if available
+            const toolsRow = document.getElementById('nodeInfoToolsRow');
+            const toolsValue = document.getElementById('nodeInfoTools');
+            if (selectedNodeData.tools && selectedNodeData.tools.length > 0) {
+                toolsValue.textContent = selectedNodeData.tools.join(', ');
+                toolsRow.style.display = 'flex';
+            } else if (selectedNodeData.toolType) {
+                toolsValue.textContent = 'Type: ' + selectedNodeData.toolType;
+                toolsRow.style.display = 'flex';
+            } else {
+                toolsRow.style.display = 'none';
+            }
+            
             document.getElementById('nodeInfo').classList.add('visible');
         });
         
@@ -1192,7 +1271,9 @@ export class WebviewProvider {
                 type: node.type,
                 functionName: node.functionName,
                 lineNumber: node.lineNumber,
-                filePath: node.filePath || graph.filePath
+                filePath: node.filePath || graph.filePath,
+                tools: node.tools,           // NEW: Include tools data
+                toolType: node.toolType      // NEW: Include toolType data
             };
 
             // If this is a child node, set the parent
