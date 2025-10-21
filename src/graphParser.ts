@@ -206,6 +206,22 @@ export class GraphParser {
             }
         }
 
+        // Pattern for create_retriever_tool (RAG-specific)
+        // e.g., retriever_tool = create_retriever_tool(retriever, "name", "description")
+        const createRetrieverToolPattern = /([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*create_retriever_tool\s*\(/g;
+        while ((match = createRetrieverToolPattern.exec(text)) !== null) {
+            tools.add(match[1]);
+            console.log(`LangGraph Parser - Detected create_retriever_tool: ${match[1]}`);
+        }
+
+        // Pattern for other LangChain tool creation functions
+        // e.g., tool = create_tool(...), tool = Tool.from_function(...)
+        const createToolPattern = /([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(?:create_tool|Tool\.from_function|StructuredTool\.from_function)\s*\(/g;
+        while ((match = createToolPattern.exec(text)) !== null) {
+            tools.add(match[1]);
+            console.log(`LangGraph Parser - Detected tool creation: ${match[1]}`);
+        }
+
         // Pattern for tool variable assignments (e.g., tavily_tool = TavilySearchResults(...))
         const toolVarPattern = /([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(?:[A-Z][a-zA-Z0-9_]*\(|[a-zA-Z_][a-zA-Z0-9_]*\()/g;
         while ((match = toolVarPattern.exec(text)) !== null) {
@@ -347,6 +363,14 @@ export class GraphParser {
                     return { type: 'agent', tools, toolType: 'bind_tools' };
                 }
 
+                // Check for with_structured_output (used in RAG grading, etc.)
+                if (/\.with_structured_output\s*\(/.test(funcBody)) {
+                    // Extract the schema/model name if available
+                    const schemaMatch = funcBody.match(/\.with_structured_output\s*\(\s*([A-Z][a-zA-Z0-9_]*)/);
+                    const schemaName = schemaMatch ? [schemaMatch[1]] : [];
+                    return { type: 'agent', tools: schemaName, toolType: 'structured_output' };
+                }
+
                 // Check for tools= parameter
                 if (/tools\s*=\s*\[/.test(funcBody)) {
                     const tools = this.extractToolsFromParameter(funcBody);
@@ -381,10 +405,21 @@ export class GraphParser {
      */
     private static extractToolsFromBindTools(functionBody: string): string[] {
         const tools: string[] = [];
-        const bindToolsMatch = functionBody.match(/\.bind_tools\s*\(\s*\[([^\]]+)\]/);
 
+        // Pattern 1: .bind_tools([tool1, tool2])
+        const bindToolsMatch = functionBody.match(/\.bind_tools\s*\(\s*\[([^\]]+)\]/);
         if (bindToolsMatch) {
             const toolList = bindToolsMatch[1];
+            const toolNames = toolList.match(/[a-zA-Z_][a-zA-Z0-9_]*/g);
+            if (toolNames) {
+                tools.push(...toolNames);
+            }
+        }
+
+        // Pattern 2: .bind_tools(tools=[tool1, tool2])
+        const bindToolsKwargMatch = functionBody.match(/\.bind_tools\s*\(\s*tools\s*=\s*\[([^\]]+)\]/);
+        if (bindToolsKwargMatch) {
+            const toolList = bindToolsKwargMatch[1];
             const toolNames = toolList.match(/[a-zA-Z_][a-zA-Z0-9_]*/g);
             if (toolNames) {
                 tools.push(...toolNames);
@@ -437,44 +472,127 @@ export class GraphParser {
         }
 
         // Pattern for .add_conditional_edges("from", function, {...}) or .add_conditional_edges(FROM_CONST, ...)
-        const conditionalEdgePattern = /\.add_conditional_edges\s*\(\s*(?:["']([^"']+)["']|([A-Z_][A-Z0-9_]*))/g;
+        // We need to carefully extract the function name, skipping comments
+        const conditionalEdgePattern = /\.add_conditional_edges\s*\(\s*(?:["']([^"']+)["']|([A-Z_][A-Z0-9_]*))\s*,/g;
 
         while ((match = conditionalEdgePattern.exec(text)) !== null) {
             const fromNode = match[1] || match[2]; // Handle both quoted and constant
 
-            // Try to extract the mapping dictionary after this call
-            const startIdx = match.index + match[0].length;
-            const remainingText = text.substring(startIdx);
+            // Now extract what comes after the first comma, skipping comments and whitespace
+            const afterFirstComma = text.substring(match.index + match[0].length);
 
-            // Look for the dictionary/mapping - handle multi-line dicts
-            const dictMatch = remainingText.match(/\{[\s\S]*?\}/);
-            if (dictMatch) {
-                const dictText = dictMatch[0];
+            // Match the function name, accounting for comments on separate lines
+            // This will skip lines that start with # and capture the first identifier
+            const functionNameMatch = afterFirstComma.match(/(?:[\s\n]*#[^\n]*\n)*\s*([a-zA-Z_][a-zA-Z0-9_]*)/);
 
-                // Extract key-value pairs - handle both "key": "value" and CONST: CONST
-                // Pattern 1: "key": "value"
-                const quotedPairPattern = /["']([^"']+)["']\s*:\s*["']([^"']+)["']/g;
-                let pairMatch;
+            if (!functionNameMatch) {
+                continue;
+            }
 
-                while ((pairMatch = quotedPairPattern.exec(dictText)) !== null) {
-                    edges.push({
-                        from: fromNode,
-                        to: pairMatch[2],
-                        type: 'conditional',
-                        label: pairMatch[1]
+            const functionName = functionNameMatch[1];
+            console.log(`LangGraph Parser - Found conditional edge from "${fromNode}" with function "${functionName}"`);
+
+            // Try to extract the mapping dictionary after the function name
+            const afterFunction = afterFirstComma.substring(functionNameMatch[0].length);
+
+            // First, find the closing parenthesis of this add_conditional_edges call
+            // We need to properly count parentheses to find the matching close paren
+            let parenCount = 1; // We already have the opening paren from add_conditional_edges(
+            let closeParenIdx = -1;
+
+            // Start from the position after the function name in the original text
+            const searchStartIdx = match.index + match[0].length + functionNameMatch[0].length;
+
+            for (let i = 0; i < text.length - searchStartIdx; i++) {
+                const char = text[searchStartIdx + i];
+                if (char === '(') {
+                    parenCount++;
+                } else if (char === ')') {
+                    parenCount--;
+                    if (parenCount === 0) {
+                        closeParenIdx = i;
+                        break;
+                    }
+                }
+            }
+
+            if (closeParenIdx === -1) {
+                console.log(`LangGraph Parser - Warning: Could not find closing parenthesis for add_conditional_edges from "${fromNode}"`);
+                continue;
+            }
+
+            // Now only look for a dictionary within this function call
+            const withinCall = text.substring(searchStartIdx, searchStartIdx + closeParenIdx);
+
+            // Skip to the comma after the function name, then look for dictionary
+            const afterFunctionComma = afterFunction.match(/\s*,\s*([\s\S]*)/);
+
+            if (afterFunctionComma) {
+                // Look for the dictionary/mapping - only within the function call bounds
+                const dictMatch = withinCall.match(/,\s*\{[\s\S]*?\}/);
+
+                if (dictMatch) {
+                    const dictText = dictMatch[0].substring(dictMatch[0].indexOf('{'));
+                    console.log(`LangGraph Parser - Found dictionary for conditional edge: ${dictText.substring(0, 100)}...`);
+
+                    // Remove comments from dictionary text before parsing
+                    const dictTextNoComments = dictText.replace(/#[^\n]*/g, '');
+
+                    // Extract key-value pairs - handle both "key": "value" and CONST: CONST
+                    // Pattern 1: "key": "value"
+                    const quotedPairPattern = /["']([^"']+)["']\s*:\s*["']([^"']+)["']/g;
+                    let pairMatch;
+
+                    while ((pairMatch = quotedPairPattern.exec(dictTextNoComments)) !== null) {
+                        console.log(`LangGraph Parser - Extracted edge: ${fromNode} -> ${pairMatch[2]} (label: ${pairMatch[1]})`);
+                        edges.push({
+                            from: fromNode,
+                            to: pairMatch[2],
+                            type: 'conditional',
+                            label: pairMatch[1]
+                        });
+                    }
+
+                    // Pattern 2: CONST: CONST (e.g., END: END)
+                    const constPairPattern = /([A-Z_][A-Z0-9_]*)\s*:\s*([A-Z_][A-Z0-9_]*)/g;
+                    while ((pairMatch = constPairPattern.exec(dictTextNoComments)) !== null) {
+                        console.log(`LangGraph Parser - Extracted edge: ${fromNode} -> ${pairMatch[2]} (label: ${pairMatch[1]})`);
+                        edges.push({
+                            from: fromNode,
+                            to: pairMatch[2],
+                            type: 'conditional',
+                            label: pairMatch[1]
+                        });
+                    }
+                    continue; // Dictionary found, move to next conditional edge
+                } else {
+                    console.log(`LangGraph Parser - No dictionary found in add_conditional_edges call, will check function return type`);
+                }
+            }
+
+            // No explicit mapping dictionary - try to extract from function's return type annotation
+            // Look for: def function_name(...) -> Literal["node1", "node2"]:
+            const funcDefPattern = new RegExp(`def\\s+${functionName}\\s*\\([\\s\\S]*?\\)\\s*->\\s*Literal\\[([^\\]]+)\\]`, 's');
+            const funcDefMatch = text.match(funcDefPattern);
+
+            if (funcDefMatch) {
+                const literalContent = funcDefMatch[1];
+                // Extract all quoted strings from the Literal
+                const nodeNames = literalContent.match(/["']([^"']+)["']/g);
+
+                if (nodeNames) {
+                    console.log(`LangGraph Parser - Extracted conditional targets from Literal: ${nodeNames.join(', ')}`);
+                    nodeNames.forEach(quotedName => {
+                        const nodeName = quotedName.replace(/["']/g, '');
+                        edges.push({
+                            from: fromNode,
+                            to: nodeName,
+                            type: 'conditional'
+                        });
                     });
                 }
-
-                // Pattern 2: CONST: CONST (e.g., END: END)
-                const constPairPattern = /([A-Z_][A-Z0-9_]*)\s*:\s*([A-Z_][A-Z0-9_]*)/g;
-                while ((pairMatch = constPairPattern.exec(dictText)) !== null) {
-                    edges.push({
-                        from: fromNode,
-                        to: pairMatch[2],
-                        type: 'conditional',
-                        label: pairMatch[1]
-                    });
-                }
+            } else {
+                console.log(`LangGraph Parser - Warning: Could not find return type annotation for function "${functionName}"`);
             }
         }
 
