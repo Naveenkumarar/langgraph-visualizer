@@ -83,14 +83,28 @@ export function activate(context: vscode.ExtensionContext) {
     // Register the show graph command
     const showGraphCommand = vscode.commands.registerCommand(
         'langgraph-visualizer.showGraph',
-        async () => {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                vscode.window.showErrorMessage('No active editor found');
-                return;
+        async (uri?: vscode.Uri) => {
+            let document: vscode.TextDocument;
+
+            if (uri) {
+                // Command invoked from explorer context menu with a file URI
+                try {
+                    document = await vscode.workspace.openTextDocument(uri);
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Failed to open file: ${error}`);
+                    return;
+                }
+            } else {
+                // Command invoked from command palette or editor context menu
+                const editor = vscode.window.activeTextEditor;
+                if (!editor) {
+                    vscode.window.showErrorMessage('No active editor found');
+                    return;
+                }
+                document = editor.document;
             }
 
-            await loadAndDisplayGraph(editor.document, true);
+            await loadAndDisplayGraph(document, true);
         }
     );
     context.subscriptions.push(showGraphCommand);

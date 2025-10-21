@@ -38,9 +38,26 @@
     "commands": [
       {
         "command": "langgraph-visualizer.showGraph",
-        "title": "Show LangGraph Visualization"
+        "title": "Show LangGraph Visualization",
+        "icon": "$(graph)"
       }
-    ]
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "langgraph-visualizer.showGraph",
+          "when": "editorLangId == python",
+          "group": "navigation@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "langgraph-visualizer.showGraph",
+          "when": "resourceLangId == python",
+          "group": "navigation@1"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
