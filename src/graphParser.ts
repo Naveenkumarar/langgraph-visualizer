@@ -316,6 +316,34 @@ export class GraphParser {
         }
 
         // Check if it's an agent (node that uses tools)
+        // First, check if the function expression is a variable created with create_react_agent
+        const variableNameMatch = functionExpression.match(/^([a-zA-Z_][a-zA-Z0-9_]*)$/);
+        if (variableNameMatch) {
+            const variableName = variableNameMatch[1];
+            console.log(`LangGraph Parser - Checking if "${variableName}" is an agent variable`);
+
+            // Check if this variable is defined as an agent in agentDefinitions
+            if (agentDefinitions.has(variableName)) {
+                const agentInfo = agentDefinitions.get(variableName)!;
+                console.log(`LangGraph Parser - ✓ Found "${variableName}" in agentDefinitions with tools: ${agentInfo.tools.join(', ')}`);
+                return { type: 'agent', tools: agentInfo.tools, toolType: agentInfo.agentType };
+            }
+
+            // Also check for direct create_react_agent assignment pattern
+            const agentVarPattern = new RegExp(`${variableName}\\s*=\\s*create_react_agent\\s*\\([\\s\\S]*?tools\\s*=\\s*\\[([^\\]]+)\\]`, 's');
+            const agentVarMatch = fullText.match(agentVarPattern);
+            if (agentVarMatch) {
+                const toolList = agentVarMatch[1];
+                const tools: string[] = [];
+                const toolNames = toolList.match(/[a-zA-Z_][a-zA-Z0-9_]*/g);
+                if (toolNames) {
+                    tools.push(...toolNames);
+                }
+                console.log(`LangGraph Parser - ✓ Found create_react_agent variable "${variableName}" with tools: ${tools.join(', ')}`);
+                return { type: 'agent', tools, toolType: 'create_react_agent' };
+            }
+        }
+
         // Look for the function definition and check if it uses bind_tools, tools=, or invokes tools
         const functionNameForAgent = functionExpression.match(/([a-zA-Z_][a-zA-Z0-9_]*)/)?.[1];
         if (functionNameForAgent) {
@@ -553,7 +581,19 @@ export class GraphParser {
                         });
                     }
 
-                    // Pattern 2: CONST: CONST (e.g., END: END)
+                    // Pattern 2: "key": CONST (e.g., "end": END)
+                    const quotedKeyConstValuePattern = /["']([^"']+)["']\s*:\s*([A-Z_][A-Z0-9_]*)/g;
+                    while ((pairMatch = quotedKeyConstValuePattern.exec(dictTextNoComments)) !== null) {
+                        console.log(`LangGraph Parser - Extracted edge: ${fromNode} -> ${pairMatch[2]} (label: ${pairMatch[1]})`);
+                        edges.push({
+                            from: fromNode,
+                            to: pairMatch[2],
+                            type: 'conditional',
+                            label: pairMatch[1]
+                        });
+                    }
+
+                    // Pattern 3: CONST: CONST (e.g., END: END)
                     const constPairPattern = /([A-Z_][A-Z0-9_]*)\s*:\s*([A-Z_][A-Z0-9_]*)/g;
                     while ((pairMatch = constPairPattern.exec(dictTextNoComments)) !== null) {
                         console.log(`LangGraph Parser - Extracted edge: ${fromNode} -> ${pairMatch[2]} (label: ${pairMatch[1]})`);
