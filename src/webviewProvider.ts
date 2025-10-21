@@ -7,12 +7,23 @@ import { GraphStructure } from './graphParser';
 export class WebviewProvider {
     private static currentPanel: vscode.WebviewPanel | undefined;
     private static currentDocument: vscode.TextDocument | undefined;
+    private static fileWatcher: vscode.FileSystemWatcher | undefined;
+    private static context: vscode.ExtensionContext | undefined;
+    private static refreshCallback: (() => Promise<void>) | undefined;
 
     /**
      * Show the graph visualization in a webview panel
      */
-    public static show(context: vscode.ExtensionContext, graphData: GraphStructure, document: vscode.TextDocument): void {
+    public static show(
+        context: vscode.ExtensionContext,
+        graphData: GraphStructure,
+        document: vscode.TextDocument,
+        refreshCallback?: () => Promise<void>
+    ): void {
         WebviewProvider.currentDocument = document;
+        WebviewProvider.context = context;
+        WebviewProvider.refreshCallback = refreshCallback;
+
         const column = vscode.window.activeTextEditor
             ? vscode.window.activeTextEditor.viewColumn
             : undefined;
@@ -21,6 +32,9 @@ export class WebviewProvider {
             WebviewProvider.currentPanel.reveal(column);
             WebviewProvider.currentPanel.webview.html = this.getWebviewContent(graphData);
         } else {
+            // Set up file watcher for auto-reload
+            WebviewProvider.setupFileWatcher(document);
+
             const panel = vscode.window.createWebviewPanel(
                 'langgraphVisualizer',
                 'LangGraph Visualization',
@@ -117,7 +131,79 @@ export class WebviewProvider {
 
             panel.onDidDispose(() => {
                 WebviewProvider.currentPanel = undefined;
+                WebviewProvider.disposeFileWatcher();
             }, null, context.subscriptions);
+        }
+    }
+
+    /**
+     * Set up file watcher for auto-reload
+     */
+    private static setupFileWatcher(document: vscode.TextDocument): void {
+        // Clean up any existing watcher
+        WebviewProvider.disposeFileWatcher();
+
+        // Get workspace folder
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+        if (!workspaceFolder) {
+            return;
+        }
+
+        // Watch all Python files in the workspace
+        const pattern = new vscode.RelativePattern(workspaceFolder, '**/*.py');
+        WebviewProvider.fileWatcher = vscode.workspace.createFileSystemWatcher(pattern);
+
+        // Debounce timer to avoid excessive reloads
+        let reloadTimer: NodeJS.Timeout | undefined;
+        const debounceDelay = 500; // 500ms delay
+
+        const scheduleReload = () => {
+            if (reloadTimer) {
+                clearTimeout(reloadTimer);
+            }
+            reloadTimer = setTimeout(async () => {
+                if (WebviewProvider.refreshCallback && WebviewProvider.currentPanel) {
+                    console.log('LangGraph Visualizer - File changed, reloading graph...');
+                    try {
+                        await WebviewProvider.refreshCallback();
+                    } catch (error) {
+                        console.error('Error reloading graph:', error);
+                    }
+                }
+            }, debounceDelay);
+        };
+
+        // Listen for file changes
+        WebviewProvider.fileWatcher.onDidChange(scheduleReload);
+        WebviewProvider.fileWatcher.onDidCreate(scheduleReload);
+        WebviewProvider.fileWatcher.onDidDelete(scheduleReload);
+
+        console.log('LangGraph Visualizer - File watcher set up for auto-reload');
+    }
+
+    /**
+     * Dispose file watcher
+     */
+    private static disposeFileWatcher(): void {
+        if (WebviewProvider.fileWatcher) {
+            WebviewProvider.fileWatcher.dispose();
+            WebviewProvider.fileWatcher = undefined;
+            console.log('LangGraph Visualizer - File watcher disposed');
+        }
+    }
+
+    /**
+     * Update the webview with new graph data
+     */
+    public static update(graphData: GraphStructure): void {
+        if (WebviewProvider.currentPanel) {
+            // Show reload toast before updating
+            WebviewProvider.currentPanel.webview.postMessage({ command: 'showReloadToast' });
+
+            // Update the webview content
+            setTimeout(() => {
+                WebviewProvider.currentPanel!.webview.html = this.getWebviewContent(graphData);
+            }, 100);
         }
     }
 
@@ -470,6 +556,53 @@ export class WebviewProvider {
         .zoom-button:hover {
             background-color: var(--vscode-button-secondaryHoverBackground);
         }
+        
+        /* Auto-reload toast notification */
+        #reloadToast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: var(--vscode-notifications-background);
+            color: var(--vscode-notifications-foreground);
+            border: 1px solid var(--vscode-notifications-border);
+            padding: 12px 20px;
+            border-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            display: none;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            z-index: 10000;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        #reloadToast.show {
+            display: flex;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateY(100px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        
+        .reload-icon {
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            from {
+                transform: rotate(0deg);
+            }
+            to {
+                transform: rotate(360deg);
+            }
+        }
     </style>
 </head>
 <body>
@@ -599,6 +732,23 @@ export class WebviewProvider {
 
     <script>
         const vscode = acquireVsCodeApi();
+        
+        // Handle messages from extension
+        window.addEventListener('message', event => {
+            const message = event.data;
+            switch (message.command) {
+                case 'showReloadToast':
+                    const toast = document.getElementById('reloadToast');
+                    if (toast) {
+                        toast.classList.add('show');
+                        // Auto-hide after 2 seconds
+                        setTimeout(() => {
+                            toast.classList.remove('show');
+                        }, 2000);
+                    }
+                    break;
+            }
+        });
         
         // Graph data
         const cytoscapeElements = ${JSON.stringify(cytoscapeData)};
@@ -1222,6 +1372,16 @@ export class WebviewProvider {
         }
         
     </script>
+    
+    <!-- Auto-reload toast notification -->
+    <div id="reloadToast">
+        <svg class="reload-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"/>
+            <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/>
+        </svg>
+        <span>Graph reloading...</span>
+    </div>
+    
 </body>
 </html>`;
     }

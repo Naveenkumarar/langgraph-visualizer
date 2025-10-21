@@ -18,6 +18,68 @@ export function activate(context: vscode.ExtensionContext) {
     statusBarItem.tooltip = 'Show LangGraph Visualization';
     context.subscriptions.push(statusBarItem);
 
+    // Function to load and display graph
+    const loadAndDisplayGraph = async (document: vscode.TextDocument, showMessages: boolean = true) => {
+        if (!GraphDetector.hasLangGraph(document)) {
+            if (showMessages) {
+                vscode.window.showWarningMessage('No LangGraph code detected in the current file');
+            }
+            return;
+        }
+
+        try {
+            if (showMessages) {
+                vscode.window.showInformationMessage('🔍 Analyzing graph structure...');
+            }
+
+            // Get workspace root
+            const workspaceRoot = vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath;
+            if (!workspaceRoot) {
+                if (showMessages) {
+                    vscode.window.showErrorMessage('No workspace root found');
+                }
+                return;
+            }
+
+            // Create file traverser and build complete graph hierarchy
+            const fileTraverser = new FileTraverser(workspaceRoot);
+            const graphData = await fileTraverser.buildGraphHierarchy(document.fileName);
+
+            if (graphData.nodes.length === 0) {
+                if (showMessages) {
+                    vscode.window.showInformationMessage('No graph structure found in this file or its dependencies');
+                }
+                return;
+            }
+
+            // Create refresh callback for auto-reload
+            const refreshCallback = async () => {
+                const currentDoc = vscode.window.activeTextEditor?.document || document;
+                const updatedGraphData = await fileTraverser.buildGraphHierarchy(currentDoc.fileName);
+                WebviewProvider.update(updatedGraphData);
+                console.log('LangGraph Visualizer - Graph reloaded');
+            };
+
+            // Show the complete graph hierarchy in webview
+            WebviewProvider.show(context, graphData, document, refreshCallback);
+
+            if (showMessages) {
+                // Show success message with stats
+                const totalNodes = countTotalNodes(graphData);
+                const totalFiles = countTotalFiles(graphData);
+                vscode.window.showInformationMessage(
+                    `✅ Graph loaded: ${totalNodes} nodes across ${totalFiles} files`
+                );
+            }
+
+        } catch (error) {
+            console.error('Error in loadAndDisplayGraph:', error);
+            if (showMessages) {
+                vscode.window.showErrorMessage(`Failed to analyze graph: ${error}`);
+            }
+        }
+    };
+
     // Register the show graph command
     const showGraphCommand = vscode.commands.registerCommand(
         'langgraph-visualizer.showGraph',
@@ -28,48 +90,7 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            const document = editor.document;
-            if (!GraphDetector.hasLangGraph(document)) {
-                vscode.window.showWarningMessage(
-                    'No LangGraph code detected in the current file'
-                );
-                return;
-            }
-
-            try {
-                // Show loading message
-                vscode.window.showInformationMessage('🔍 Analyzing graph structure...');
-
-                // Get workspace root
-                const workspaceRoot = vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath;
-                if (!workspaceRoot) {
-                    vscode.window.showErrorMessage('No workspace root found');
-                    return;
-                }
-
-                // Create file traverser and build complete graph hierarchy
-                const fileTraverser = new FileTraverser(workspaceRoot);
-                const graphData = await fileTraverser.buildGraphHierarchy(document.fileName);
-
-                if (graphData.nodes.length === 0) {
-                    vscode.window.showInformationMessage('No graph structure found in this file or its dependencies');
-                    return;
-                }
-
-                // Show the complete graph hierarchy in webview
-                WebviewProvider.show(context, graphData, document);
-
-                // Show success message with stats
-                const totalNodes = countTotalNodes(graphData);
-                const totalFiles = countTotalFiles(graphData);
-                vscode.window.showInformationMessage(
-                    `✅ Graph loaded: ${totalNodes} nodes across ${totalFiles} files`
-                );
-
-            } catch (error) {
-                console.error('Error in showGraph command:', error);
-                vscode.window.showErrorMessage(`Failed to analyze graph: ${error}`);
-            }
+            await loadAndDisplayGraph(editor.document, true);
         }
     );
     context.subscriptions.push(showGraphCommand);
