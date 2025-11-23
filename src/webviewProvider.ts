@@ -7,23 +7,34 @@ import { GraphStructure } from './graphParser';
 export class WebviewProvider {
     private static currentPanel: vscode.WebviewPanel | undefined;
     private static currentDocument: vscode.TextDocument | undefined;
+    private static fileWatcher: vscode.FileSystemWatcher | undefined;
+    private static context: vscode.ExtensionContext | undefined;
+    private static refreshCallback: (() => Promise<void>) | undefined;
 
     /**
      * Show the graph visualization in a webview panel
      */
-    public static show(context: vscode.ExtensionContext, graphData: GraphStructure, document: vscode.TextDocument): void {
-        // Store the document reference for jump-to-code
+    public static show(
+        context: vscode.ExtensionContext,
+        graphData: GraphStructure,
+        document: vscode.TextDocument,
+        refreshCallback?: () => Promise<void>
+    ): void {
         WebviewProvider.currentDocument = document;
+        WebviewProvider.context = context;
+        WebviewProvider.refreshCallback = refreshCallback;
+
         const column = vscode.window.activeTextEditor
             ? vscode.window.activeTextEditor.viewColumn
             : undefined;
 
-        // If we already have a panel, show it
         if (WebviewProvider.currentPanel) {
             WebviewProvider.currentPanel.reveal(column);
             WebviewProvider.currentPanel.webview.html = this.getWebviewContent(graphData);
         } else {
-            // Otherwise, create a new panel
+            // Set up file watcher for auto-reload
+            WebviewProvider.setupFileWatcher(document);
+
             const panel = vscode.window.createWebviewPanel(
                 'langgraphVisualizer',
                 'LangGraph Visualization',
@@ -35,116 +46,184 @@ export class WebviewProvider {
             );
 
             WebviewProvider.currentPanel = panel;
-
-            // Set the webview's content
             panel.webview.html = this.getWebviewContent(graphData);
 
-            // Handle messages from the webview
             panel.webview.onDidReceiveMessage(
                 message => {
                     switch (message.command) {
                         case 'jumpToCode':
                             if (message.lineNumber) {
-                                const line = message.lineNumber - 1; // VS Code uses 0-based line numbers
+                                const line = message.lineNumber - 1;
 
-                                // Use stored document or fallback to active editor
-                                const document = WebviewProvider.currentDocument || vscode.window.activeTextEditor?.document;
-                                if (!document) {
-                                    vscode.window.showErrorMessage('No document found. Please open the Python file first.');
-                                    return;
+                                // Helper function to jump to line in a document
+                                const jumpToLineInDocument = (document: vscode.TextDocument, lineNumber: number) => {
+                                    const lineText = document.lineAt(lineNumber).text;
+                                    const lineLength = lineText.length;
+                                    const range = new vscode.Range(lineNumber, 0, lineNumber, lineLength);
+
+                                    vscode.window.showTextDocument(document, {
+                                        viewColumn: vscode.ViewColumn.One,
+                                        preserveFocus: false,
+                                        preview: false
+                                    }).then(editor => {
+                                        setTimeout(() => {
+                                            editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+                                            editor.selection = new vscode.Selection(lineNumber, 0, lineNumber, lineLength);
+
+                                            const decoration = vscode.window.createTextEditorDecorationType({
+                                                backgroundColor: '#FFD700',
+                                                border: '3px solid #FF6B6B',
+                                                borderRadius: '5px',
+                                                fontWeight: 'bold',
+                                                opacity: '0.9'
+                                            });
+
+                                            let blinkCount = 0;
+                                            const maxBlinks = 8;
+                                            const blinkInterval = 500;
+
+                                            const blink = () => {
+                                                if (blinkCount % 2 === 0) {
+                                                    editor.setDecorations(decoration, [range]);
+                                                } else {
+                                                    editor.setDecorations(decoration, []);
+                                                }
+                                                blinkCount++;
+
+                                                if (blinkCount < maxBlinks) {
+                                                    setTimeout(blink, blinkInterval);
+                                                } else {
+                                                    decoration.dispose();
+                                                }
+                                            };
+
+                                            blink();
+                                        }, 100);
+                                    });
+                                };
+
+                                // Use the provided filePath or fallback to current document
+                                if (message.filePath) {
+                                    // Open the specific file
+                                    const targetUri = vscode.Uri.file(message.filePath);
+                                    vscode.workspace.openTextDocument(targetUri).then(doc => {
+                                        jumpToLineInDocument(doc, line);
+                                    }, (error: any) => {
+                                        vscode.window.showErrorMessage(`Could not open file: ${message.filePath}`);
+                                        console.error('Error opening file:', error);
+                                    });
+                                } else {
+                                    // Fallback to current document
+                                    const document = WebviewProvider.currentDocument || vscode.window.activeTextEditor?.document;
+                                    if (!document) {
+                                        vscode.window.showErrorMessage('No document found. Please open the Python file first.');
+                                        return;
+                                    }
+                                    jumpToLineInDocument(document, line);
                                 }
-
-                                // Get the full line content
-                                const lineText = document.lineAt(line).text;
-                                const lineLength = lineText.length;
-
-                                // Create a range that covers the entire line
-                                const range = new vscode.Range(line, 0, line, lineLength);
-
-                                // Ensure the document is visible by opening it
-                                vscode.window.showTextDocument(document, {
-                                    viewColumn: vscode.ViewColumn.One,
-                                    preserveFocus: false,
-                                    preview: false
-                                }).then(editor => {
-                                    // Wait a moment for the editor to be ready
-                                    setTimeout(() => {
-                                        // Reveal the line in center and select it
-                                        editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-                                        editor.selection = new vscode.Selection(line, 0, line, lineLength);
-
-                                        // Create blinking decoration
-                                        const decoration = vscode.window.createTextEditorDecorationType({
-                                            backgroundColor: '#FFD700', // Bright yellow background
-                                            border: '3px solid #FF6B6B', // Red border
-                                            borderRadius: '5px',
-                                            fontWeight: 'bold',
-                                            opacity: '0.9'
-                                        });
-
-                                        let blinkCount = 0;
-                                        const maxBlinks = 8; // 4 seconds with 500ms intervals = 8 blinks
-                                        const blinkInterval = 500; // 500ms between blinks
-
-                                        // Blinking function
-                                        const blink = () => {
-                                            if (blinkCount % 2 === 0) {
-                                                // Show decoration
-                                                editor.setDecorations(decoration, [range]);
-                                            } else {
-                                                // Hide decoration
-                                                editor.setDecorations(decoration, []);
-                                            }
-                                            blinkCount++;
-
-                                            if (blinkCount < maxBlinks) {
-                                                setTimeout(blink, blinkInterval);
-                                            } else {
-                                                // Final cleanup - remove decoration completely
-                                                decoration.dispose();
-                                            }
-                                        };
-
-                                        // Start blinking
-                                        blink();
-
-                                        // Show a prominent message to confirm the jump
-                                        vscode.window.showInformationMessage(
-                                            `🎯 Jumped to line ${message.lineNumber}: ${lineText.trim()}`,
-                                            { modal: false }
-                                        );
-                                    }, 100);
-                                });
-
-                            } else {
-                                console.warn('Cannot jump to code - no line number');
-                                vscode.window.showErrorMessage('Cannot jump to code: No line number available');
                             }
-                            return;
+                            break;
+                        case 'copyToClipboard':
+                            // Handle clipboard copy using VS Code API
+                            if (message.text) {
+                                vscode.env.clipboard.writeText(message.text).then(() => {
+                                    // Send success message back to webview
+                                    panel.webview.postMessage({ command: 'clipboardCopySuccess' });
+                                }, (error: any) => {
+                                    console.error('Failed to copy to clipboard:', error);
+                                    panel.webview.postMessage({ command: 'clipboardCopyError', error: error.message });
+                                });
+                            }
+                            break;
                     }
                 },
                 undefined,
                 context.subscriptions
             );
 
-            // Reset when the current panel is closed
-            panel.onDidDispose(
-                () => {
-                    WebviewProvider.currentPanel = undefined;
-                    WebviewProvider.currentDocument = undefined;
-                },
-                null,
-                context.subscriptions
-            );
+            panel.onDidDispose(() => {
+                WebviewProvider.currentPanel = undefined;
+                WebviewProvider.disposeFileWatcher();
+            }, null, context.subscriptions);
         }
     }
 
     /**
-     * Generate HTML content for the webview
+     * Set up file watcher for auto-reload
+     */
+    private static setupFileWatcher(document: vscode.TextDocument): void {
+        // Clean up any existing watcher
+        WebviewProvider.disposeFileWatcher();
+
+        // Get workspace folder
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+        if (!workspaceFolder) {
+            return;
+        }
+
+        // Watch all Python files in the workspace
+        const pattern = new vscode.RelativePattern(workspaceFolder, '**/*.py');
+        WebviewProvider.fileWatcher = vscode.workspace.createFileSystemWatcher(pattern);
+
+        // Debounce timer to avoid excessive reloads
+        let reloadTimer: NodeJS.Timeout | undefined;
+        const debounceDelay = 500; // 500ms delay
+
+        const scheduleReload = () => {
+            if (reloadTimer) {
+                clearTimeout(reloadTimer);
+            }
+            reloadTimer = setTimeout(async () => {
+                if (WebviewProvider.refreshCallback && WebviewProvider.currentPanel) {
+                    console.log('LangGraph Visualizer - File changed, reloading graph...');
+                    try {
+                        await WebviewProvider.refreshCallback();
+                    } catch (error) {
+                        console.error('Error reloading graph:', error);
+                    }
+                }
+            }, debounceDelay);
+        };
+
+        // Listen for file changes
+        WebviewProvider.fileWatcher.onDidChange(scheduleReload);
+        WebviewProvider.fileWatcher.onDidCreate(scheduleReload);
+        WebviewProvider.fileWatcher.onDidDelete(scheduleReload);
+
+        console.log('LangGraph Visualizer - File watcher set up for auto-reload');
+    }
+
+    /**
+     * Dispose file watcher
+     */
+    private static disposeFileWatcher(): void {
+        if (WebviewProvider.fileWatcher) {
+            WebviewProvider.fileWatcher.dispose();
+            WebviewProvider.fileWatcher = undefined;
+            console.log('LangGraph Visualizer - File watcher disposed');
+        }
+    }
+
+    /**
+     * Update the webview with new graph data
+     */
+    public static update(graphData: GraphStructure): void {
+        if (WebviewProvider.currentPanel) {
+            // Show reload toast before updating
+            WebviewProvider.currentPanel.webview.postMessage({ command: 'showReloadToast' });
+
+            // Update the webview content
+            setTimeout(() => {
+                WebviewProvider.currentPanel!.webview.html = this.getWebviewContent(graphData);
+            }, 100);
+        }
+    }
+
+    /**
+     * Generate webview HTML content
      */
     private static getWebviewContent(graphData: GraphStructure): string {
-        // Convert graph data to Cytoscape format
-        const cytoscapeElements = this.convertToCytoscapeFormat(graphData);
+        const cytoscapeData = this.convertToCytoscapeFormat(graphData);
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -285,7 +364,7 @@ export class WebviewProvider {
         
         #legend {
             position: absolute;
-            top: 10px;
+            bottom: 60px;
             right: 10px;
             background-color: var(--vscode-editor-inactiveSelectionBackground);
             border: 1px solid var(--vscode-panel-border);
@@ -294,6 +373,191 @@ export class WebviewProvider {
             font-size: 12px;
             z-index: 1000;
             backdrop-filter: blur(10px);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        #statePanel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: var(--vscode-editor-inactiveSelectionBackground);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 1001;
+            backdrop-filter: blur(10px);
+            min-width: 250px;
+            max-width: 400px;
+            max-height: 80vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            transition: all 0.3s ease;
+        }
+
+        #statePanel.collapsed {
+            max-height: 40px;
+        }
+
+        #statePanel.hidden {
+            display: none;
+        }
+
+        .state-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            background-color: var(--vscode-editor-background);
+            border-bottom: 1px solid var(--vscode-panel-border);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .state-header:hover {
+            background-color: var(--vscode-list-hoverBackground);
+        }
+
+        .state-header h3 {
+            margin: 0;
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .state-type-badge {
+            background-color: var(--vscode-badge-background);
+            color: var(--vscode-badge-foreground);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .collapse-icon {
+            font-size: 16px;
+            transition: transform 0.3s ease;
+        }
+
+        #statePanel.collapsed .collapse-icon {
+            transform: rotate(-90deg);
+        }
+
+        .state-content {
+            padding: 12px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        #statePanel.collapsed .state-content {
+            display: none;
+        }
+
+        .state-field {
+            margin: 8px 0;
+            padding: 8px;
+            background-color: var(--vscode-editor-background);
+            border-radius: 3px;
+            border-left: 3px solid var(--vscode-button-background);
+        }
+
+        .state-field-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 4px;
+        }
+
+        .state-field-name {
+            font-weight: 600;
+            color: var(--vscode-foreground);
+            font-size: 12px;
+            font-family: var(--vscode-editor-font-family);
+        }
+
+        .state-field-type {
+            color: var(--vscode-descriptionForeground);
+            font-size: 11px;
+            font-family: var(--vscode-editor-font-family);
+            font-style: italic;
+        }
+
+        .state-field-value {
+            color: var(--vscode-textLink-foreground);
+            font-size: 11px;
+            margin-top: 4px;
+            padding: 4px 6px;
+            background-color: var(--vscode-input-background);
+            border-radius: 2px;
+            font-family: var(--vscode-editor-font-family);
+            border: 1px solid var(--vscode-input-border);
+            word-break: break-all;
+        }
+
+        .state-field-annotation {
+            color: var(--vscode-editorWarning-foreground);
+            font-size: 10px;
+            margin-top: 4px;
+            font-family: var(--vscode-editor-font-family);
+        }
+
+        .copy-state-btn {
+            background-color: transparent;
+            color: var(--vscode-foreground);
+            border: none;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-size: 14px;
+            border-radius: 3px;
+            transition: background-color 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .copy-state-btn:hover {
+            background-color: var(--vscode-list-hoverBackground);
+        }
+
+        .copy-state-btn:active {
+            transform: scale(0.95);
+        }
+
+        .copy-toast {
+            position: fixed;
+            bottom: 80px;
+            right: 20px;
+            background-color: var(--vscode-notifications-background);
+            color: var(--vscode-notifications-foreground);
+            border: 1px solid var(--vscode-notifications-border);
+            padding: 10px 16px;
+            border-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            display: none;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            z-index: 10000;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .copy-toast.show {
+            display: flex;
+        }
+
+        .copy-toast-icon {
+            color: var(--vscode-notificationsInfoIcon-foreground);
+        }
+
+        .no-state-message {
+            color: var(--vscode-descriptionForeground);
+            font-style: italic;
+            text-align: center;
+            padding: 20px;
         }
         
         #legend h3 {
@@ -319,6 +583,14 @@ export class WebviewProvider {
         .legend-color.start { background-color: #4CAF50; }
         .legend-color.node { background-color: #2196F3; }
         .legend-color.end { background-color: #F44336; }
+        .legend-color.tool { 
+            background-color: #9C27B0;
+            clip-path: polygon(30% 0%, 70% 0%, 100% 50%, 70% 100%, 30% 100%, 0% 50%);
+        }
+        .legend-color.agent { 
+            background-color: #FF9800;
+            transform: rotate(45deg);
+        }
         .legend-color.direct { 
             width: 30px;
             height: 3px;
@@ -330,6 +602,38 @@ export class WebviewProvider {
             height: 3px;
             background-color: #FF9800;
             border: none;
+        }
+        .legend-color.bidirectional { 
+            width: 30px;
+            height: 3px;
+            background-color: #9C27B0;
+            border: none;
+        }
+        .legend-color.subgraph-entry { 
+            width: 30px;
+            height: 3px;
+            background-color: #4CAF50;
+            border: none;
+        }
+        .legend-color.subgraph-exit { 
+            width: 30px;
+            height: 3px;
+            background-color: #F44336;
+            border: none;
+        }
+        .legend-color.main-graph-parent { 
+            width: 30px;
+            height: 20px;
+            background-color: #fff3e0;
+            border: 4px solid #ff9800;
+            border-radius: 3px;
+        }
+        .legend-color.subgraph-parent { 
+            width: 30px;
+            height: 20px;
+            background-color: #f0f8ff;
+            border: 3px solid #2196f3;
+            border-radius: 3px;
         }
         
         #nodeInfo {
@@ -370,6 +674,8 @@ export class WebviewProvider {
         .node-badge.start { background-color: #4CAF50; color: white; }
         .node-badge.node { background-color: #2196F3; color: white; }
         .node-badge.end { background-color: #F44336; color: white; }
+        .node-badge.tool { background-color: #9C27B0; color: white; }
+        .node-badge.agent { background-color: #FF9800; color: white; }
         
         .info-row {
             margin: 5px 0;
@@ -447,13 +753,60 @@ export class WebviewProvider {
         .zoom-button:hover {
             background-color: var(--vscode-button-secondaryHoverBackground);
         }
+        
+        /* Auto-reload toast notification */
+        #reloadToast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: var(--vscode-notifications-background);
+            color: var(--vscode-notifications-foreground);
+            border: 1px solid var(--vscode-notifications-border);
+            padding: 12px 20px;
+            border-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            display: none;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            z-index: 10000;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        #reloadToast.show {
+            display: flex;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateY(100px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        
+        .reload-icon {
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            from {
+                transform: rotate(0deg);
+            }
+            to {
+                transform: rotate(360deg);
+            }
+        }
     </style>
 </head>
 <body>
     <div id="header">
         <div style="display: flex; align-items: center; gap: 15px;">
             <h1>LangGraph Visualization</h1>
-            <span class="graph-type-badge">${this.escapeHtml(graphData.graphType)}</span>
+            <span class="graph-type-badge">${graphData.graphType}</span>
         </div>
         <div id="controls">
             <div class="search-box">
@@ -468,17 +821,57 @@ export class WebviewProvider {
             <div id="stats">
                 <div class="stat">
                     <span>Nodes:</span>
-                    <span class="stat-value">${graphData.nodes.length}</span>
+                    <span class="stat-value" id="nodeCount">0</span>
                 </div>
                 <div class="stat">
                     <span>Edges:</span>
-                    <span class="stat-value">${graphData.edges.length}</span>
+                    <span class="stat-value" id="edgeCount">0</span>
+                </div>
+                <div class="stat">
+                    <span>Files:</span>
+                    <span class="stat-value" id="fileCount">1</span>
                 </div>
             </div>
         </div>
     </div>
     
     <div id="cy">
+        <div id="statePanel" class="${graphData.state && graphData.state.length > 0 ? '' : 'hidden'}">
+            <div class="state-header" id="statePanelHeader">
+                <h3>
+                    <span>State</span>
+                    ${graphData.stateType ? '<span class="state-type-badge">' + graphData.stateType + '</span>' : ''}
+                </h3>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <button class="copy-state-btn" id="copyStateBtn" title="Copy state JSON to clipboard">
+                        📋
+                    </button>
+                    <span class="collapse-icon">▼</span>
+                </div>
+            </div>
+            <div class="state-content">
+                ${graphData.state && graphData.state.length > 0 ?
+                graphData.state.map(field => {
+                    const exampleValue = this.getExampleValue(field);
+                    return `
+                        <div class="state-field" data-field-name="${field.name}" data-field-type="${field.type}">
+                            <div class="state-field-header">
+                                <div class="state-field-name">${field.name}</div>
+                            </div>
+                            <div class="state-field-type">${field.type}</div>
+                            ${field.defaultValue ?
+                            '<div class="state-field-value">' + field.defaultValue + '</div>' :
+                            '<div class="state-field-value">' + exampleValue + '</div>'
+                        }
+                            ${field.annotation ? '<div class="state-field-annotation">⚙️ ' + field.annotation + '</div>' : ''}
+                        </div>
+                    `;
+                }).join('')
+                : '<div class="no-state-message">No state fields defined</div>'
+            }
+            </div>
+        </div>
+        
         <div id="legend">
             <h3>Legend</h3>
             <div class="legend-item">
@@ -494,12 +887,40 @@ export class WebviewProvider {
                 <span>End Node</span>
             </div>
             <div class="legend-item">
+                <div class="legend-color tool"></div>
+                <span>Tool Node</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color agent"></div>
+                <span>Agent Node</span>
+            </div>
+            <div class="legend-item">
                 <div class="legend-color direct"></div>
                 <span>Direct Edge</span>
             </div>
             <div class="legend-item">
                 <div class="legend-color conditional"></div>
                 <span>Conditional Edge</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color bidirectional"></div>
+                <span>Agent-Tool Edge</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color subgraph-entry"></div>
+                <span>Subgraph Entry</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color subgraph-exit"></div>
+                <span>Subgraph Exit</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color main-graph-parent"></div>
+                <span>Main Graph Container</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color subgraph-parent"></div>
+                <span>Subgraph Container</span>
             </div>
         </div>
         
@@ -517,8 +938,12 @@ export class WebviewProvider {
                 <span class="info-value" id="nodeInfoLine">-</span>
             </div>
             <div class="info-row">
-                <span class="info-label">Type:</span>
-                <span class="info-value" id="nodeInfoType">-</span>
+                <span class="info-label">File:</span>
+                <span class="info-value" id="nodeInfoFile">-</span>
+            </div>
+            <div class="info-row" id="nodeInfoToolsRow" style="display: none;">
+                <span class="info-label">Tools:</span>
+                <span class="info-value" id="nodeInfoTools">-</span>
             </div>
             <button class="jump-button" id="jumpToCodeBtn">Jump to Code</button>
         </div>
@@ -531,7 +956,6 @@ export class WebviewProvider {
             </div>
         </div>
         
-        
         <div class="zoom-controls">
             <button class="zoom-button" id="zoomInBtn" title="Zoom In">+</button>
             <button class="zoom-button" id="zoomOutBtn" title="Zoom Out">−</button>
@@ -542,9 +966,37 @@ export class WebviewProvider {
     <script>
         const vscode = acquireVsCodeApi();
         
+        // Handle messages from extension
+        window.addEventListener('message', event => {
+            const message = event.data;
+            switch (message.command) {
+                case 'showReloadToast':
+                    const toast = document.getElementById('reloadToast');
+                    if (toast) {
+                        toast.classList.add('show');
+                        // Auto-hide after 2 seconds
+                        setTimeout(() => {
+                            toast.classList.remove('show');
+                        }, 2000);
+                    }
+                    break;
+                case 'clipboardCopySuccess':
+                    const copyToast = document.getElementById('copyToast');
+                    if (copyToast) {
+                        copyToast.classList.add('show');
+                        setTimeout(() => {
+                            copyToast.classList.remove('show');
+                        }, 2000);
+                    }
+                    break;
+                case 'clipboardCopyError':
+                    alert('Failed to copy state to clipboard: ' + (message.error || 'Unknown error'));
+                    break;
+            }
+        });
         
         // Graph data
-        const graphData = ${JSON.stringify(cytoscapeElements)};
+        const cytoscapeElements = ${JSON.stringify(cytoscapeData)};
         
         // Check if Cytoscape is loaded
         if (typeof cytoscape === 'undefined') {
@@ -560,7 +1012,7 @@ export class WebviewProvider {
         // Fallback visualization function
         function showFallbackVisualization() {
             const cyContainer = document.getElementById('cy');
-            const nodesHtml = graphData.nodes.map(node => 
+            const nodesHtml = cytoscapeElements.nodes.map(node => 
                 '<div style="margin: 5px; padding: 5px; border: 1px solid #ccc; border-radius: 3px; display: inline-block; margin: 2px;">' +
                 '<span style="background-color: ' + (node.data.type === 'start' ? '#4CAF50' : node.data.type === 'end' ? '#F44336' : '#2196F3') + '; color: white; padding: 2px 6px; border-radius: 2px; font-size: 12px;">' + node.data.type.toUpperCase() + '</span> ' +
                 node.data.label + 
@@ -568,7 +1020,7 @@ export class WebviewProvider {
                 '</div>'
             ).join('');
             
-            const edgesHtml = graphData.edges.map(edge => 
+            const edgesHtml = cytoscapeElements.edges.map(edge => 
                 '<div style="margin: 5px; padding: 5px; border: 1px solid #ddd; border-radius: 3px; display: inline-block; margin: 2px;">' +
                 edge.data.source + ' → ' + edge.data.target +
                 (edge.data.label ? '<br><small>Label: ' + edge.data.label + '</small>' : '') +
@@ -578,11 +1030,11 @@ export class WebviewProvider {
             cyContainer.innerHTML = '<div style="padding: 20px; text-align: center;">' +
                 '<h3>Fallback Visualization</h3>' +
                 '<div style="margin: 20px 0;">' +
-                '<strong>Nodes (' + graphData.nodes.length + '):</strong><br>' +
+                '<strong>Nodes (' + cytoscapeElements.nodes.length + '):</strong><br>' +
                 nodesHtml +
                 '</div>' +
                 '<div style="margin: 20px 0;">' +
-                '<strong>Edges (' + graphData.edges.length + '):</strong><br>' +
+                '<strong>Edges (' + cytoscapeElements.edges.length + '):</strong><br>' +
                 edgesHtml +
                 '</div>' +
                 '</div>';
@@ -593,7 +1045,7 @@ export class WebviewProvider {
         try {
             cy = cytoscape({
             container: document.getElementById('cy'),
-            elements: graphData,
+            elements: cytoscapeElements,
             style: [
                 {
                     selector: 'node',
@@ -630,6 +1082,31 @@ export class WebviewProvider {
                     }
                 },
                 {
+                    selector: 'node[type="tool"]',
+                    style: {
+                        'background-color': '#9C27B0',
+                        'border-color': '#6A1B9A',
+                        'shape': 'hexagon'
+                    }
+                },
+                {
+                    selector: 'node[type="agent"]',
+                    style: {
+                        'background-color': '#FF9800',
+                        'border-color': '#E65100',
+                        'shape': 'diamond'
+                    }
+                },
+                {
+                    selector: 'node[type="subgraph"]',
+                    style: {
+                        'background-color': '#e3f2fd',
+                        'border-color': '#2196f3',
+                        'border-width': '3px',
+                        'border-style': 'dashed'
+                    }
+                },
+                {
                     selector: 'node:selected',
                     style: {
                         'border-width': '5px',
@@ -648,12 +1125,12 @@ export class WebviewProvider {
                 {
                     selector: 'edge',
                     style: {
-                        'width': 3,
+                        'width': 2,
                         'line-color': '#2196F3',
                         'target-arrow-color': '#2196F3',
                         'target-arrow-shape': 'triangle',
-                        'curve-style': 'bezier',
-                        'arrow-scale': 1.5,
+                        'curve-style': 'straight',
+                        'arrow-scale': 1.2,
                         'transition-property': 'line-color, target-arrow-color, width',
                         'transition-duration': '0.2s'
                     }
@@ -664,6 +1141,63 @@ export class WebviewProvider {
                         'line-color': '#FF9800',
                         'target-arrow-color': '#FF9800',
                         'line-style': 'dashed'
+                    }
+                },
+                {
+                    selector: 'edge[type="bidirectional"]',
+                    style: {
+                        'line-color': '#9C27B0',
+                        'target-arrow-color': '#9C27B0',
+                        'source-arrow-color': '#9C27B0',
+                        'source-arrow-shape': 'triangle',
+                        'target-arrow-shape': 'triangle',
+                        'arrow-scale': 1.0,
+                        'curve-style': 'bezier',
+                        'label': 'data(label)',
+                        'text-rotation': 'autorotate',
+                        'font-size': '10px',
+                        'color': '#9C27B0',
+                        'text-margin-y': -10
+                    }
+                },
+                {
+                    selector: 'edge[type="subgraph-entry"]',
+                    style: {
+                        'line-color': '#4CAF50',
+                        'target-arrow-color': '#4CAF50',
+                        'line-width': 4,
+                        'target-arrow-shape': 'triangle',
+                        'target-arrow-size': 10,
+                        'curve-style': 'bezier',
+                        'control-point-step-size': 100,
+                        'control-point-distances': [50, 100],
+                        'control-point-weights': [0.25, 0.75],
+                        'label': 'data(label)',
+                        'text-rotation': 'autorotate',
+                        'text-margin-y': -15,
+                        'font-size': '12px',
+                        'color': '#4CAF50',
+                        'font-weight': 'bold'
+                    }
+                },
+                {
+                    selector: 'edge[type="subgraph-exit"]',
+                    style: {
+                        'line-color': '#F44336',
+                        'target-arrow-color': '#F44336',
+                        'line-width': 4,
+                        'target-arrow-shape': 'triangle',
+                        'target-arrow-size': 10,
+                        'curve-style': 'bezier',
+                        'control-point-step-size': 100,
+                        'control-point-distances': [50, 100],
+                        'control-point-weights': [0.25, 0.75],
+                        'label': 'data(label)',
+                        'text-rotation': 'autorotate',
+                        'text-margin-y': -15,
+                        'font-size': '12px',
+                        'color': '#F44336',
+                        'font-weight': 'bold'
                     }
                 },
                 {
@@ -691,14 +1225,102 @@ export class WebviewProvider {
                     style: {
                         'opacity': 0.2
                     }
+                },
+                {
+                    selector: 'node[type="subgraph"]',
+                    style: {
+                        'background-color': '#e3f2fd',
+                        'border-color': '#2196f3',
+                        'border-width': '3px',
+                        'border-style': 'dashed'
+                    }
+                },
+                {
+                    selector: 'node[type="subgraph-parent"]',
+                    style: {
+                        'background-color': '#f0f8ff',
+                        'border-color': '#2196f3',
+                        'border-width': '3px',
+                        'border-style': 'solid',
+                        'shape': 'rectangle',
+                        'width': 'data(width)',
+                        'height': 'data(height)',
+                        'text-valign': 'top',
+                        'text-halign': 'center',
+                        'color': '#2196f3',
+                        'font-weight': 'bold',
+                        'font-size': '12px',
+                        'padding': '10px',
+                        'text-wrap': 'wrap',
+                        'text-max-width': '200px'
+                    }
+                },
+                {
+                    selector: '.subgraph-parent',
+                    style: {
+                        'background-color': '#f0f8ff',
+                        'border-color': '#2196f3',
+                        'border-width': '3px',
+                        'border-style': 'solid',
+                        'shape': 'rectangle'
+                    }
+                },
+                {
+                    selector: 'node:parent',
+                    style: {
+                        'background-opacity': 0.1,
+                        'border-opacity': 1,
+                        'text-opacity': 1
+                    }
+                },
+                {
+                    selector: 'node:parent node',
+                    style: {
+                        'background-opacity': 1,
+                        'border-opacity': 1
+                    }
+                },
+                {
+                    selector: 'node[type="main-graph-parent"]',
+                    style: {
+                        'background-color': '#fff3e0',
+                        'border-color': '#ff9800',
+                        'border-width': '4px',
+                        'border-style': 'solid',
+                        'shape': 'rectangle',
+                        'width': 'data(width)',
+                        'height': 'data(height)',
+                        'text-valign': 'top',
+                        'text-halign': 'center',
+                        'color': '#ff9800',
+                        'font-weight': 'bold',
+                        'font-size': '14px',
+                        'padding': '15px',
+                        'text-wrap': 'wrap',
+                        'text-max-width': '300px'
+                    }
+                },
+                {
+                    selector: '.main-graph-parent',
+                    style: {
+                        'background-color': '#fff3e0',
+                        'border-color': '#ff9800',
+                        'border-width': '4px',
+                        'border-style': 'solid',
+                        'shape': 'rectangle'
+                    }
                 }
             ],
             layout: {
                 name: 'dagre',
                 rankDir: 'TB',
-                nodeSep: 50,
-                rankSep: 100,
-                padding: 50
+                nodeSep: 20,
+                rankSep: 40,
+                padding: 20,
+                edgeSep: 15,
+                align: 'UL',
+                acyclicer: 'greedy',
+                spacingFactor: 1.0
             },
             minZoom: 0.3,
             maxZoom: 3,
@@ -715,7 +1337,7 @@ export class WebviewProvider {
         }
         
         // Check if graph is empty
-        if (graphData.nodes.length === 0) {
+        if (cytoscapeElements.nodes.length === 0) {
             document.getElementById('helpText').innerHTML = 
                 '<div class="help-icon">📝</div>' +
                 '<div><strong>No Graph Data</strong><br>No nodes or edges were detected in the current file.</div>';
@@ -726,7 +1348,42 @@ export class WebviewProvider {
         if (cy && cy.nodes().length > 0) {
             setTimeout(() => {
                 document.getElementById('helpText').classList.add('hidden');
+                // Apply alternating subgraph positioning
+                applyAlternatingSubgraphLayout();
             }, 3000);
+        }
+
+        // Function to position subgraphs in alternating left-right pattern
+        function applyAlternatingSubgraphLayout() {
+            if (!cy) return;
+            
+            const subgraphParents = cy.nodes('[type="subgraph-parent"]');
+            
+            if (subgraphParents.length === 0) return;
+            
+            // Get the main graph container bounds
+            const mainContainer = cy.nodes('[type="main-graph-parent"]');
+            const mainBounds = mainContainer.boundingBox();
+            const centerX = mainBounds.x1 + mainBounds.w / 2;
+            const topY = mainBounds.y1; // Start from top of main container
+            
+            // Position subgraphs in alternating pattern starting from top
+            subgraphParents.forEach((subgraph, index) => {
+                const isLeft = index % 2 === 0;
+                const offsetX = isLeft ? -250 : 250; // Left or right offset (increased for better separation)
+                const offsetY = Math.floor(index / 2) * 180; // Vertical stacking (increased spacing)
+                
+                const newX = centerX + offsetX;
+                const newY = topY + offsetY; // Start from top, not center
+                
+                subgraph.position({
+                    x: newX,
+                    y: newY
+                });
+            });
+            
+            // Refresh the layout
+            cy.fit(50);
         }
         
         // Node click handler - show details (only if cy is defined)
@@ -745,7 +1402,21 @@ export class WebviewProvider {
             document.getElementById('nodeInfoBadge').className = 'node-badge ' + selectedNodeData.type;
             document.getElementById('nodeInfoFunction').textContent = selectedNodeData.functionName || '-';
             document.getElementById('nodeInfoLine').textContent = selectedNodeData.lineNumber || '-';
-            document.getElementById('nodeInfoType').textContent = selectedNodeData.type;
+            document.getElementById('nodeInfoFile').textContent = selectedNodeData.filePath ? selectedNodeData.filePath.split('/').pop() : '-';
+            
+            // Show tools information if available
+            const toolsRow = document.getElementById('nodeInfoToolsRow');
+            const toolsValue = document.getElementById('nodeInfoTools');
+            if (selectedNodeData.tools && selectedNodeData.tools.length > 0) {
+                toolsValue.textContent = selectedNodeData.tools.join(', ');
+                toolsRow.style.display = 'flex';
+            } else if (selectedNodeData.toolType) {
+                toolsValue.textContent = 'Type: ' + selectedNodeData.toolType;
+                toolsRow.style.display = 'flex';
+            } else {
+                toolsRow.style.display = 'none';
+            }
+            
             document.getElementById('nodeInfo').classList.add('visible');
         });
         
@@ -774,22 +1445,26 @@ export class WebviewProvider {
             setTimeout(() => {
             if (selectedNodeData) {
                 const lineNumber = selectedNodeData.lineNumber;
+                const filePath = selectedNodeData.filePath;
                 
                 if (lineNumber) {
                     vscode.postMessage({
                         command: 'jumpToCode',
-                        lineNumber: lineNumber
+                        lineNumber: lineNumber,
+                        filePath: filePath
                     });
                 } else {
                     alert('No line number available for this node');
                 }
             } else if (selectedNode) {
                 const lineNumber = selectedNode.data('lineNumber');
+                const filePath = selectedNode.data('filePath');
                 
                 if (lineNumber) {
                     vscode.postMessage({
                         command: 'jumpToCode',
-                        lineNumber: lineNumber
+                        lineNumber: lineNumber,
+                        filePath: filePath
                     });
                 } else {
                     alert('No line number available for this node');
@@ -843,11 +1518,19 @@ export class WebviewProvider {
                     cy.layout({
                         name: 'dagre',
                         rankDir: 'TB',
-                        nodeSep: 50,
-                        rankSep: 100,
-                        padding: 50
+                        nodeSep: 20,
+                        rankSep: 40,
+                        padding: 20,
+                        edgeSep: 15,
+                        align: 'UL',
+                        acyclicer: 'greedy',
+                        spacingFactor: 1.0
                     }).run();
-                    cy.fit(50);
+                    
+                    // Apply alternating subgraph positioning after layout
+                    setTimeout(() => {
+                        applyAlternatingSubgraphLayout();
+                    }, 100);
                 }
             });
         
@@ -911,62 +1594,330 @@ export class WebviewProvider {
             cy.on('mouseout', 'node', function(evt) {
                 document.body.style.cursor = 'default';
             });
+            
+            // Update statistics
+            function updateStats() {
+                document.getElementById('nodeCount').textContent = cy.nodes().length;
+                document.getElementById('edgeCount').textContent = cy.edges().length;
+                
+                // Count unique files
+                const files = new Set();
+                cy.nodes().forEach(node => {
+                    if (node.data('filePath')) {
+                        files.add(node.data('filePath'));
+                    }
+                });
+                document.getElementById('fileCount').textContent = files.size;
+            }
+
+            // Initial stats update
+            cy.ready(() => {
+                updateStats();
+            });
+        }
+
+        // State panel collapse/expand functionality
+        const statePanel = document.getElementById('statePanel');
+        const statePanelHeader = document.getElementById('statePanelHeader');
+        
+        if (statePanel && statePanelHeader) {
+            statePanelHeader.addEventListener('click', (e) => {
+                // Don't collapse if clicking the copy button
+                if (e.target.id !== 'copyStateBtn' && !e.target.closest('#copyStateBtn')) {
+                    statePanel.classList.toggle('collapsed');
+                }
+            });
+        }
+
+        // Copy state to clipboard functionality
+        const copyStateBtn = document.getElementById('copyStateBtn');
+        
+        if (copyStateBtn) {
+            copyStateBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent panel collapse
+                
+                // Collect state fields from the DOM
+                const stateFields = document.querySelectorAll('.state-field');
+                const stateObject = {};
+                
+                stateFields.forEach(field => {
+                    const name = field.getAttribute('data-field-name');
+                    const valueElement = field.querySelector('.state-field-value');
+                    
+                    if (name && valueElement) {
+                        const valueText = valueElement.textContent.trim();
+                        
+                        // Try to parse the value as JSON
+                        try {
+                            // Remove quotes for strings to get raw value
+                            if (valueText === '""') {
+                                stateObject[name] = "";
+                            } else if (valueText === 'null') {
+                                stateObject[name] = null;
+                            } else if (valueText === 'false') {
+                                stateObject[name] = false;
+                            } else if (valueText === 'true') {
+                                stateObject[name] = true;
+                            } else if (valueText === '[]') {
+                                stateObject[name] = [];
+                            } else if (valueText === '{}') {
+                                stateObject[name] = {};
+                            } else if (!isNaN(valueText) && valueText !== '') {
+                                stateObject[name] = Number(valueText);
+                            } else {
+                                stateObject[name] = valueText;
+                            }
+                        } catch (error) {
+                            stateObject[name] = valueText;
+                        }
+                    }
+                });
+                
+                // Copy to clipboard via VS Code API
+                const stateJSON = JSON.stringify(stateObject, null, 2);
+                
+                // Send message to extension to copy to clipboard
+                vscode.postMessage({
+                    command: 'copyToClipboard',
+                    text: stateJSON
+                });
+            });
         }
         
     </script>
+    
+    <!-- Auto-reload toast notification -->
+    <div id="reloadToast">
+        <svg class="reload-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"/>
+            <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/>
+        </svg>
+        <span>Graph reloading...</span>
+    </div>
+
+    <!-- Copy state toast notification -->
+    <div id="copyToast" class="copy-toast">
+        <span class="copy-toast-icon">✓</span>
+        <span>State JSON copied to clipboard!</span>
+    </div>
+    
 </body>
 </html>`;
     }
 
-    /*
-     * Convert GraphStructure to Cytoscape format
+    /**
+     * Convert graph structure to Cytoscape format with flattened subgraphs
      */
     private static convertToCytoscapeFormat(graphData: GraphStructure): any {
-        const elements: any = {
-            nodes: [],
-            edges: []
-        };
+        const nodes: any[] = [];
+        const edges: any[] = [];
 
-        // Add nodes
-        for (const node of graphData.nodes) {
-            elements.nodes.push({
-                data: {
-                    id: node.id,
-                    label: node.label,
-                    type: node.type,
-                    functionName: node.functionName,
-                    lineNumber: node.lineNumber
-                }
+        // Add main graph container
+        const mainGraphId = 'main_graph_container';
+        nodes.push({
+            data: {
+                id: mainGraphId,
+                label: 'Main Graph: ' + graphData.graphType,
+                type: 'main-graph-parent',
+                width: 400,
+                height: 300
+            },
+            classes: 'main-graph-parent'
+        });
+
+        // Add all nodes from main graph and subgraphs with main graph as parent
+        this.processGraphRecursively(graphData, nodes, edges, '', mainGraphId);
+
+        return { nodes, edges };
+    }
+
+    /**
+     * Recursively process graph and subgraphs to create flat structure
+     */
+    private static processGraphRecursively(
+        graph: GraphStructure,
+        nodes: any[],
+        edges: any[],
+        prefix: string,
+        parentId?: string
+    ): void {
+        // Add main graph nodes
+        graph.nodes.forEach(node => {
+            const nodeId = prefix + node.id;
+            const nodeData: any = {
+                id: nodeId,
+                label: node.label,
+                type: node.type,
+                functionName: node.functionName,
+                lineNumber: node.lineNumber,
+                filePath: node.filePath || graph.filePath,
+                tools: node.tools,           // NEW: Include tools data
+                toolType: node.toolType      // NEW: Include toolType data
+            };
+
+            // If this is a child node, set the parent
+            if (parentId) {
+                nodeData.parent = parentId;
+            }
+
+            nodes.push({
+                data: nodeData
             });
-        }
 
-        // Add edges
-        for (const edge of graphData.edges) {
-            elements.edges.push({
+            // If node has subgraph, create a compound node (parent) and add subgraph nodes as children
+            if (node.subgraph) {
+                // Add the parent compound node (the rectangle box)
+                const parentId = nodeId + '_parent';
+                nodes.push({
+                    data: {
+                        id: parentId,
+                        label: node.label + ' Subgraph',
+                        type: 'subgraph-parent',
+                        width: 300,
+                        height: 200
+                    },
+                    classes: 'subgraph-parent'
+                });
+
+                // Ensure subgraph nodes inherit the correct file path and set parent
+                const subgraphWithFilePath = {
+                    ...node.subgraph,
+                    filePath: node.subgraph.filePath || node.filePath
+                };
+                this.processGraphRecursively(subgraphWithFilePath, nodes, edges, nodeId + '_', parentId);
+
+                // Add arrows: main node -> subgraph start and subgraph end -> next main node
+                this.addSubgraphArrows(node, nodeId, parentId, edges, graph.nodes);
+            }
+        });
+
+        // Add main graph edges (but skip edges from nodes that have subgraphs)
+        graph.edges.forEach(edge => {
+            const sourceId = prefix + edge.from;
+            const targetId = prefix + edge.to;
+
+            // Check if the source node has a subgraph
+            const sourceNode = graph.nodes.find(node => node.id === edge.from);
+            if (sourceNode && sourceNode.subgraph) {
+                // Skip this edge - the flow will go through the subgraph instead
+                return;
+            }
+
+            edges.push({
                 data: {
-                    id: `${edge.from}-${edge.to}`,
-                    source: edge.from,
-                    target: edge.to,
+                    id: prefix + edge.from + '_to_' + edge.to,
+                    source: sourceId,
+                    target: targetId,
                     type: edge.type,
                     label: edge.label
                 }
             });
-        }
+        });
 
-        return elements;
+        // Add subgraph edges
+        graph.nodes.forEach(node => {
+            if (node.subgraph) {
+                node.subgraph.edges.forEach(subEdge => {
+                    const sourceId = prefix + node.id + '_' + subEdge.from;
+                    const targetId = prefix + node.id + '_' + subEdge.to;
+
+                    edges.push({
+                        data: {
+                            id: prefix + node.id + '_' + subEdge.from + '_to_' + subEdge.to,
+                            source: sourceId,
+                            target: targetId,
+                            type: subEdge.type,
+                            label: subEdge.label
+                        }
+                    });
+                });
+            }
+        });
     }
 
     /**
-     * Escape HTML special characters
+     * Get example value based on field type
      */
-    private static escapeHtml(text: string): string {
-        const map: { [key: string]: string } = {
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#039;'
-        };
-        return text.replace(/[&<>"']/g, m => map[m]);
+    private static getExampleValue(field: any): string {
+        const type = field.type.toLowerCase();
+
+        // Handle default values
+        if (field.defaultValue) {
+            return field.defaultValue;
+        }
+
+        // Generate example values based on type
+        if (type.includes('str')) {
+            return '""';
+        } else if (type.includes('int')) {
+            return '0';
+        } else if (type.includes('float')) {
+            return '0.0';
+        } else if (type.includes('bool')) {
+            return 'false';
+        } else if (type.includes('list') || type.includes('sequence')) {
+            return '[]';
+        } else if (type.includes('dict') || type.includes('mapping')) {
+            return '{}';
+        } else if (type.includes('tuple')) {
+            return '()';
+        } else if (type.includes('set')) {
+            return 'set()';
+        } else if (type.includes('none')) {
+            return 'null';
+        } else {
+            return 'null';
+        }
+    }
+
+    /**
+     * Add arrows between main graph nodes and subgraphs
+     */
+    private static addSubgraphArrows(
+        node: any,
+        nodeId: string,
+        parentId: string,
+        edges: any[],
+        allNodes: any[]
+    ): void {
+        // Find the subgraph start and end nodes
+        const subgraphStart = node.subgraph.nodes.find((n: any) => n.type === 'start');
+        const subgraphEnd = node.subgraph.nodes.find((n: any) => n.type === 'end');
+
+        if (subgraphStart) {
+            // Arrow from main node to subgraph start
+            const subgraphStartId = nodeId + '_' + subgraphStart.id;
+            edges.push({
+                data: {
+                    id: nodeId + '_to_' + subgraphStartId,
+                    source: nodeId,
+                    target: subgraphStartId,
+                    type: 'subgraph-entry',
+                    label: '→ Subgraph'
+                }
+            });
+        }
+
+        if (subgraphEnd) {
+            // Find the next main graph node after this one
+            const currentNodeIndex = allNodes.findIndex(n => n.id === node.id);
+            const nextNode = allNodes[currentNodeIndex + 1];
+
+            if (nextNode) {
+                // Arrow from subgraph end to next main node
+                const subgraphEndId = nodeId + '_' + subgraphEnd.id;
+                const nextNodeId = nextNode.id; // No prefix for main graph nodes
+
+                edges.push({
+                    data: {
+                        id: subgraphEndId + '_to_' + nextNodeId,
+                        source: subgraphEndId,
+                        target: nextNodeId,
+                        type: 'subgraph-exit',
+                        label: 'Subgraph →'
+                    }
+                });
+            }
+        }
     }
 }

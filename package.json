@@ -1,9 +1,9 @@
 {
   "name": "langgraph-visualizer",
-  "displayName": "LangGraph Visualizer",
+  "displayName": "LangGraph Visualizers",
   "description": "Interactive visualization of LangGraph graphs with drag-and-drop nodes, search, and jump-to-code",
-  "version": "0.1.0",
-  "publisher": "Naveenkumarar",
+  "version": "0.2.0",
+  "publisher": "smazee",
   "author": {
     "name": "Naveen Kumar"
   },
@@ -16,6 +16,7 @@
     "url": "https://github.com/Naveenkumarar/langgraph-visualizer/issues"
   },
   "homepage": "https://github.com/Naveenkumarar/langgraph-visualizer#readme",
+  "icon": "media/icons/icon.png",
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -38,9 +39,26 @@
     "commands": [
       {
         "command": "langgraph-visualizer.showGraph",
-        "title": "Show LangGraph Visualization"
+        "title": "Show LangGraph Visualization",
+        "icon": "$(graph)"
       }
-    ]
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "langgraph-visualizer.showGraph",
+          "when": "editorLangId == python",
+          "group": "navigation@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "langgraph-visualizer.showGraph",
+          "when": "resourceLangId == python",
+          "group": "navigation@1"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

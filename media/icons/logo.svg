@@ -1,0 +1,50 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="#1e1e1e" stroke="#007acc" stroke-width="2"/>
+  
+  <!-- Graph nodes -->
+  <!-- Start node (green) -->
+  <circle cx="64" cy="24" r="10" fill="#4ec9b0" stroke="#ffffff" stroke-width="2"/>
+  <text x="64" y="28" font-family="Arial, sans-serif" font-size="10" fill="#ffffff" text-anchor="middle" font-weight="bold">S</text>
+  
+  <!-- Left branch node (purple - agent) -->
+  <circle cx="32" cy="64" r="12" fill="#c586c0" stroke="#ffffff" stroke-width="2"/>
+  <text x="32" y="68" font-family="Arial, sans-serif" font-size="10" fill="#ffffff" text-anchor="middle" font-weight="bold">A</text>
+  
+  <!-- Right branch node (purple - agent) -->
+  <circle cx="96" cy="64" r="12" fill="#c586c0" stroke="#ffffff" stroke-width="2"/>
+  <text x="96" y="68" font-family="Arial, sans-serif" font-size="10" fill="#ffffff" text-anchor="middle" font-weight="bold">B</text>
+  
+  <!-- End node (red) -->
+  <circle cx="64" cy="104" r="10" fill="#f48771" stroke="#ffffff" stroke-width="2"/>
+  <text x="64" y="108" font-family="Arial, sans-serif" font-size="10" fill="#ffffff" text-anchor="middle" font-weight="bold">E</text>
+  
+  <!-- Edges/Arrows -->
+  <!-- Start to left -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#007acc" />
+    </marker>
+  </defs>
+  
+  <!-- Arrow: Start -> Left -->
+  <line x1="58" y1="31" x2="38" y2="56" stroke="#007acc" stroke-width="2" marker-end="url(#arrowhead)"/>
+  
+  <!-- Arrow: Start -> Right -->
+  <line x1="70" y1="31" x2="90" y2="56" stroke="#007acc" stroke-width="2" marker-end="url(#arrowhead)"/>
+  
+  <!-- Arrow: Left -> End -->
+  <line x1="38" y1="73" x2="58" y2="97" stroke="#007acc" stroke-width="2" marker-end="url(#arrowhead)"/>
+  
+  <!-- Arrow: Right -> End -->
+  <line x1="90" y1="73" x2="70" y2="97" stroke="#007acc" stroke-width="2" marker-end="url(#arrowhead)"/>
+  
+  <!-- Tool nodes (small orange circles) -->
+  <circle cx="20" cy="50" r="6" fill="#ce9178" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="108" cy="50" r="6" fill="#ce9178" stroke="#ffffff" stroke-width="1.5"/>
+  
+  <!-- Dotted lines to tools -->
+  <line x1="26" y1="58" x2="23" y2="52" stroke="#ce9178" stroke-width="1.5" stroke-dasharray="2,2"/>
+  <line x1="102" y1="58" x2="105" y2="52" stroke="#ce9178" stroke-width="1.5" stroke-dasharray="2,2"/>
+</svg>
+
