@@ -1,6 +1,6 @@
 <div align="center">
 
-![LangGraph Visualizer Banner](./media/banner.svg)
+![LangGraph Visualizer Banner](./media/banner.png)
 
 # LangGraph Visualizer
 
@@ -414,7 +414,7 @@ langgraph-visualizer/
 │   ├── fileTraverser.ts      # Multi-file graph support
 │   └── webviewProvider.ts    # Visualization UI
 ├── media/
-│   ├── banner.svg            # README banner
+│   ├── banner.png            # README banner
 │   ├── icons/                # Extension icons
 │   └── webview.css           # Visualization styles
 ├── test_samples/             # Example LangGraph files
