@@ -90,7 +90,7 @@ export class GraphParser {
         const usedTools = new Set<string>();
 
         // Debug logging
-        console.log('LangGraph Parser - Tool Definitions:', Array.from(toolDefinitions));
+        console.log('LangGraph Parser - Tool Definitions:', Array.from(toolDefinitions.keys()));
         console.log('LangGraph Parser - Agent Definitions:', Array.from(agentDefinitions.entries()));
 
         // Pattern for .add_node("node_name", function) - enhanced to handle function calls
@@ -147,12 +147,14 @@ export class GraphParser {
         usedTools.forEach(toolName => {
             if (!nodeSet.has(toolName)) {
                 nodeSet.add(toolName);
-                console.log(`LangGraph Parser - Adding tool node: ${toolName}`);
+                const toolInfo = toolDefinitions.get(toolName);
+                console.log(`LangGraph Parser - Adding tool node: ${toolName}${toolInfo ? ` at line ${toolInfo.lineNumber}` : ' (no line info)'}`);
                 nodes.push({
                     id: toolName,
                     label: toolName,
                     type: 'tool',
-                    toolType: 'standalone'
+                    toolType: 'standalone',
+                    lineNumber: toolInfo?.lineNumber
                 });
             }
         });
@@ -184,25 +186,33 @@ export class GraphParser {
     /**
      * Extract tool definitions from the code
      */
-    private static extractToolDefinitions(text: string): Set<string> {
-        const tools = new Set<string>();
+    private static extractToolDefinitions(text: string): Map<string, { lineNumber: number }> {
+        const tools = new Map<string, { lineNumber: number }>();
 
         // Pattern for @tool decorator
         const toolDecoratorPattern = /@tool\s*\n\s*def\s+([a-zA-Z_][a-zA-Z0-9_]*)/g;
         let match;
 
         while ((match = toolDecoratorPattern.exec(text)) !== null) {
-            tools.add(match[1]);
+            const toolName = match[1];
+            const lineNumber = this.getLineNumber(text, match.index);
+            tools.set(toolName, { lineNumber });
         }
 
-        // Pattern for ToolNode creation
+        // Pattern for ToolNode creation - these don't have a specific line we can jump to
+        // So we skip them here and they'll be handled separately
         const toolNodePattern = /ToolNode\s*\(\s*\[([^\]]+)\]/g;
         while ((match = toolNodePattern.exec(text)) !== null) {
             const toolList = match[1];
+            const lineNumber = this.getLineNumber(text, match.index);
             // Extract individual tool names
             const toolNames = toolList.match(/[a-zA-Z_][a-zA-Z0-9_]*/g);
             if (toolNames) {
-                toolNames.forEach(name => tools.add(name));
+                toolNames.forEach(name => {
+                    if (!tools.has(name)) {
+                        tools.set(name, { lineNumber });
+                    }
+                });
             }
         }
 
@@ -210,25 +220,32 @@ export class GraphParser {
         // e.g., retriever_tool = create_retriever_tool(retriever, "name", "description")
         const createRetrieverToolPattern = /([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*create_retriever_tool\s*\(/g;
         while ((match = createRetrieverToolPattern.exec(text)) !== null) {
-            tools.add(match[1]);
-            console.log(`LangGraph Parser - Detected create_retriever_tool: ${match[1]}`);
+            const toolName = match[1];
+            const lineNumber = this.getLineNumber(text, match.index);
+            tools.set(toolName, { lineNumber });
+            console.log(`LangGraph Parser - Detected create_retriever_tool: ${toolName} at line ${lineNumber}`);
         }
 
         // Pattern for other LangChain tool creation functions
         // e.g., tool = create_tool(...), tool = Tool.from_function(...)
         const createToolPattern = /([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(?:create_tool|Tool\.from_function|StructuredTool\.from_function)\s*\(/g;
         while ((match = createToolPattern.exec(text)) !== null) {
-            tools.add(match[1]);
-            console.log(`LangGraph Parser - Detected tool creation: ${match[1]}`);
+            const toolName = match[1];
+            const lineNumber = this.getLineNumber(text, match.index);
+            tools.set(toolName, { lineNumber });
+            console.log(`LangGraph Parser - Detected tool creation: ${toolName} at line ${lineNumber}`);
         }
 
         // Pattern for tool variable assignments (e.g., tavily_tool = TavilySearchResults(...))
         const toolVarPattern = /([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(?:[A-Z][a-zA-Z0-9_]*\(|[a-zA-Z_][a-zA-Z0-9_]*\()/g;
         while ((match = toolVarPattern.exec(text)) !== null) {
             const varName = match[1];
+            const lineNumber = this.getLineNumber(text, match.index);
             // Common tool variable naming patterns
             if (varName.toLowerCase().includes('tool') || varName.toLowerCase().includes('repl')) {
-                tools.add(varName);
+                if (!tools.has(varName)) {
+                    tools.set(varName, { lineNumber });
+                }
             }
         }
 
@@ -290,7 +307,7 @@ export class GraphParser {
         nodeName: string,
         functionExpression: string,
         fullText: string,
-        toolDefinitions: Set<string>,
+        toolDefinitions: Map<string, { lineNumber: number }>,
         agentDefinitions: Map<string, { tools: string[], agentType: string }>
     ): { type: 'node' | 'tool' | 'agent', tools?: string[], toolType?: string } {
 
@@ -392,11 +409,9 @@ export class GraphParser {
                 }
 
                 // Check for with_structured_output (used in RAG grading, etc.)
+                // Note: structured output schemas are NOT tools, they're just output formatting
                 if (/\.with_structured_output\s*\(/.test(funcBody)) {
-                    // Extract the schema/model name if available
-                    const schemaMatch = funcBody.match(/\.with_structured_output\s*\(\s*([A-Z][a-zA-Z0-9_]*)/);
-                    const schemaName = schemaMatch ? [schemaMatch[1]] : [];
-                    return { type: 'agent', tools: schemaName, toolType: 'structured_output' };
+                    return { type: 'agent', toolType: 'structured_output' };
                 }
 
                 // Check for tools= parameter
@@ -412,9 +427,9 @@ export class GraphParser {
 
                 // Check if function invokes any known tools
                 const usedTools: string[] = [];
-                toolDefinitions.forEach(tool => {
-                    if (new RegExp(`\\b${tool}\\s*\\(`).test(funcBody)) {
-                        usedTools.push(tool);
+                toolDefinitions.forEach((toolInfo, toolName) => {
+                    if (new RegExp(`\\b${toolName}\\s*\\(`).test(funcBody)) {
+                        usedTools.push(toolName);
                     }
                 });
 
