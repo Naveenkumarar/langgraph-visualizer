@@ -123,6 +123,18 @@ export class WebviewProvider {
                                 }
                             }
                             break;
+                        case 'copyToClipboard':
+                            // Handle clipboard copy using VS Code API
+                            if (message.text) {
+                                vscode.env.clipboard.writeText(message.text).then(() => {
+                                    // Send success message back to webview
+                                    panel.webview.postMessage({ command: 'clipboardCopySuccess' });
+                                }, (error: any) => {
+                                    console.error('Failed to copy to clipboard:', error);
+                                    panel.webview.postMessage({ command: 'clipboardCopyError', error: error.message });
+                                });
+                            }
+                            break;
                     }
                 },
                 undefined,
@@ -968,6 +980,18 @@ export class WebviewProvider {
                         }, 2000);
                     }
                     break;
+                case 'clipboardCopySuccess':
+                    const copyToast = document.getElementById('copyToast');
+                    if (copyToast) {
+                        copyToast.classList.add('show');
+                        setTimeout(() => {
+                            copyToast.classList.remove('show');
+                        }, 2000);
+                    }
+                    break;
+                case 'clipboardCopyError':
+                    alert('Failed to copy state to clipboard: ' + (message.error || 'Unknown error'));
+                    break;
             }
         });
         
@@ -1607,7 +1631,6 @@ export class WebviewProvider {
 
         // Copy state to clipboard functionality
         const copyStateBtn = document.getElementById('copyStateBtn');
-        const copyToast = document.getElementById('copyToast');
         
         if (copyStateBtn) {
             copyStateBtn.addEventListener('click', (e) => {
@@ -1650,20 +1673,13 @@ export class WebviewProvider {
                     }
                 });
                 
-                // Copy to clipboard
+                // Copy to clipboard via VS Code API
                 const stateJSON = JSON.stringify(stateObject, null, 2);
                 
-                navigator.clipboard.writeText(stateJSON).then(() => {
-                    // Show success toast
-                    if (copyToast) {
-                        copyToast.classList.add('show');
-                        setTimeout(() => {
-                            copyToast.classList.remove('show');
-                        }, 2000);
-                    }
-                }).catch(err => {
-                    console.error('Failed to copy state:', err);
-                    alert('Failed to copy state to clipboard');
+                // Send message to extension to copy to clipboard
+                vscode.postMessage({
+                    command: 'copyToClipboard',
+                    text: stateJSON
                 });
             });
         }
