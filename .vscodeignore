@@ -1,11 +1,45 @@
+# VS Code config
 .vscode/**
 .vscode-test/**
+
+# Source files (compiled to out/)
 src/**
+**/tsconfig.json
+**/*.map
+
+# TypeScript source files (but keep .d.ts if any)
+**/*.ts
+!**/*.d.ts
+
+# Development files
 .gitignore
 .yarnrc
+.editorconfig
 vsc-extension-quickstart.md
-**/tsconfig.json
 **/.eslintrc.json
-**/*.map
-**/*.ts
+
+# Test and sample files
+test_samples/**
+
+# Scripts (not needed in extension)
+scripts/**
+
+# Development documentation (keep user-facing docs)
+CONTRIBUTING.md
+PRE_RELEASE_CHECKLIST.md
+RELEASE_NOTES.md
+GET_STARTED.md
+QUICKSTART.md
+
+# Development artifacts
+node_modules/**
+*.vsix
+
+# Media - keep banner for README display, keep icons
+# Screenshots folder can be large, exclude if not needed
+media/screenshots/**
+
+# Git
+.git/**
+.gitattributes
 

@@ -1,0 +1,96 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Gradient definitions -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e3a8a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1" />
+    </linearGradient>
+    
+    <linearGradient id="nodeGradient1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#059669;stop-opacity:1" />
+    </linearGradient>
+    
+    <linearGradient id="nodeGradient2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2563eb;stop-opacity:1" />
+    </linearGradient>
+    
+    <linearGradient id="nodeGradient3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ef4444;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#dc2626;stop-opacity:1" />
+    </linearGradient>
+    
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+      <feOffset dx="0" dy="2" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.3"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    
+    <marker id="arrowhead" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto">
+      <polygon points="0 0, 12 4, 0 8" fill="#60a5fa" opacity="0.8"/>
+    </marker>
+  </defs>
+  
+  <!-- Background with rounded square -->
+  <rect x="0" y="0" width="256" height="256" rx="48" fill="url(#bgGradient)"/>
+  
+  <!-- Subtle pattern overlay -->
+  <rect x="0" y="0" width="256" height="256" rx="48" fill="url(#bgGradient)" opacity="0.1"/>
+  
+  <!-- Graph structure -->
+  <!-- Edges/Connections with glow -->
+  <g opacity="0.9">
+    <!-- Top to middle connections -->
+    <line x1="128" y1="65" x2="80" y2="115" stroke="#60a5fa" stroke-width="6" marker-end="url(#arrowhead)" stroke-linecap="round"/>
+    <line x1="128" y1="65" x2="128" y2="115" stroke="#60a5fa" stroke-width="6" marker-end="url(#arrowhead)" stroke-linecap="round"/>
+    <line x1="128" y1="65" x2="176" y2="115" stroke="#60a5fa" stroke-width="6" marker-end="url(#arrowhead)" stroke-linecap="round"/>
+    
+    <!-- Middle to bottom connections -->
+    <line x1="80" y1="155" x2="128" y2="185" stroke="#60a5fa" stroke-width="6" marker-end="url(#arrowhead)" stroke-linecap="round"/>
+    <line x1="128" y1="155" x2="128" y2="185" stroke="#60a5fa" stroke-width="6" marker-end="url(#arrowhead)" stroke-linecap="round"/>
+    <line x1="176" y1="155" x2="128" y2="185" stroke="#60a5fa" stroke-width="6" marker-end="url(#arrowhead)" stroke-linecap="round"/>
+  </g>
+  
+  <!-- Nodes with shadows and gradients -->
+  <!-- Start node (top) -->
+  <g filter="url(#shadow)">
+    <circle cx="128" cy="55" r="20" fill="url(#nodeGradient1)" stroke="#ffffff" stroke-width="4"/>
+    <circle cx="128" cy="55" r="16" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.3"/>
+  </g>
+  
+  <!-- Middle layer nodes -->
+  <g filter="url(#shadow)">
+    <circle cx="80" cy="135" r="22" fill="url(#nodeGradient2)" stroke="#ffffff" stroke-width="4"/>
+    <circle cx="80" cy="135" r="18" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.3"/>
+  </g>
+  
+  <g filter="url(#shadow)">
+    <circle cx="128" cy="135" r="22" fill="url(#nodeGradient2)" stroke="#ffffff" stroke-width="4"/>
+    <circle cx="128" cy="135" r="18" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.3"/>
+  </g>
+  
+  <g filter="url(#shadow)">
+    <circle cx="176" cy="135" r="22" fill="url(#nodeGradient2)" stroke="#ffffff" stroke-width="4"/>
+    <circle cx="176" cy="135" r="18" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.3"/>
+  </g>
+  
+  <!-- End node (bottom) -->
+  <g filter="url(#shadow)">
+    <circle cx="128" cy="205" r="20" fill="url(#nodeGradient3)" stroke="#ffffff" stroke-width="4"/>
+    <circle cx="128" cy="205" r="16" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.3"/>
+  </g>
+  
+  <!-- Decorative elements - small dots for visual interest -->
+  <circle cx="45" cy="80" r="4" fill="#60a5fa" opacity="0.4"/>
+  <circle cx="210" cy="80" r="4" fill="#60a5fa" opacity="0.4"/>
+  <circle cx="45" cy="175" r="4" fill="#60a5fa" opacity="0.4"/>
+  <circle cx="210" cy="175" r="4" fill="#60a5fa" opacity="0.4"/>
+</svg>
+

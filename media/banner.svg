@@ -1,0 +1,108 @@
+<svg width="1200" height="300" viewBox="0 0 1200 300" xmlns="http://www.w3.org/2000/svg">
+  <!-- Gradient definitions -->
+  <defs>
+    <linearGradient id="bannerBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f172a;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#1e293b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#334155;stop-opacity:1" />
+    </linearGradient>
+    
+    <linearGradient id="textGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#60a5fa;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1" />
+    </linearGradient>
+    
+    <linearGradient id="accentGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1" />
+    </linearGradient>
+    
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1200" height="300" fill="url(#bannerBg)"/>
+  
+  <!-- Decorative grid pattern -->
+  <g opacity="0.1">
+    <path d="M 0 0 L 1200 0 L 1200 300 L 0 300 Z" fill="none" stroke="#60a5fa" stroke-width="1"/>
+    <line x1="0" y1="100" x2="1200" y2="100" stroke="#60a5fa" stroke-width="1"/>
+    <line x1="0" y1="200" x2="1200" y2="200" stroke="#60a5fa" stroke-width="1"/>
+    <line x1="300" y1="0" x2="300" y2="300" stroke="#60a5fa" stroke-width="1"/>
+    <line x1="600" y1="0" x2="600" y2="300" stroke="#60a5fa" stroke-width="1"/>
+    <line x1="900" y1="0" x2="900" y2="300" stroke="#60a5fa" stroke-width="1"/>
+  </g>
+  
+  <!-- Decorative nodes and connections on left side -->
+  <g opacity="0.4">
+    <!-- Nodes -->
+    <circle cx="120" cy="80" r="12" fill="#10b981" filter="url(#glow)"/>
+    <circle cx="80" cy="150" r="10" fill="#3b82f6" filter="url(#glow)"/>
+    <circle cx="120" cy="150" r="10" fill="#3b82f6" filter="url(#glow)"/>
+    <circle cx="160" cy="150" r="10" fill="#3b82f6" filter="url(#glow)"/>
+    <circle cx="120" cy="220" r="12" fill="#ef4444" filter="url(#glow)"/>
+    
+    <!-- Edges -->
+    <line x1="120" y1="92" x2="80" y2="140" stroke="#60a5fa" stroke-width="2"/>
+    <line x1="120" y1="92" x2="120" y2="140" stroke="#60a5fa" stroke-width="2"/>
+    <line x1="120" y1="92" x2="160" y2="140" stroke="#60a5fa" stroke-width="2"/>
+    <line x1="80" y1="160" x2="120" y2="210" stroke="#60a5fa" stroke-width="2"/>
+    <line x1="120" y1="160" x2="120" y2="210" stroke="#60a5fa" stroke-width="2"/>
+    <line x1="160" y1="160" x2="120" y2="210" stroke="#60a5fa" stroke-width="2"/>
+  </g>
+  
+  <!-- Decorative nodes on right side -->
+  <g opacity="0.3">
+    <circle cx="1080" cy="80" r="8" fill="#60a5fa" filter="url(#glow)"/>
+    <circle cx="1050" cy="120" r="6" fill="#3b82f6" filter="url(#glow)"/>
+    <circle cx="1110" cy="120" r="6" fill="#3b82f6" filter="url(#glow)"/>
+    <circle cx="1080" cy="220" r="8" fill="#60a5fa" filter="url(#glow)"/>
+    
+    <line x1="1080" y1="88" x2="1050" y2="114" stroke="#60a5fa" stroke-width="2"/>
+    <line x1="1080" y1="88" x2="1110" y2="114" stroke="#60a5fa" stroke-width="2"/>
+    <line x1="1050" y1="126" x2="1080" y2="212" stroke="#60a5fa" stroke-width="2"/>
+    <line x1="1110" y1="126" x2="1080" y2="212" stroke="#60a5fa" stroke-width="2"/>
+  </g>
+  
+  <!-- Main title -->
+  <text x="600" y="120" font-family="'Segoe UI', system-ui, sans-serif" font-size="68" font-weight="700" fill="url(#textGradient)" text-anchor="middle" filter="url(#glow)">
+    LangGraph Visualizer
+  </text>
+  
+  <!-- Subtitle -->
+  <text x="600" y="165" font-family="'Segoe UI', system-ui, sans-serif" font-size="24" font-weight="400" fill="#94a3b8" text-anchor="middle">
+    Interactive Graph Visualization for VS Code
+  </text>
+  
+  <!-- Feature tags -->
+  <g transform="translate(350, 200)">
+    <rect x="0" y="0" width="140" height="35" rx="17.5" fill="#1e293b" stroke="#3b82f6" stroke-width="2"/>
+    <text x="70" y="23" font-family="'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="600" fill="#60a5fa" text-anchor="middle">
+      🎯 Auto-Detect
+    </text>
+  </g>
+  
+  <g transform="translate(510, 200)">
+    <rect x="0" y="0" width="140" height="35" rx="17.5" fill="#1e293b" stroke="#10b981" stroke-width="2"/>
+    <text x="70" y="23" font-family="'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="600" fill="#10b981" text-anchor="middle">
+      🚀 Interactive
+    </text>
+  </g>
+  
+  <g transform="translate(670, 200)">
+    <rect x="0" y="0" width="140" height="35" rx="17.5" fill="#1e293b" stroke="#f59e0b" stroke-width="2"/>
+    <text x="70" y="23" font-family="'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="600" fill="#f59e0b" text-anchor="middle">
+      ⚡ Jump-to-Code
+    </text>
+  </g>
+  
+  <!-- Accent line at bottom -->
+  <rect x="0" y="290" width="1200" height="10" fill="url(#accentGradient)"/>
+</svg>
+

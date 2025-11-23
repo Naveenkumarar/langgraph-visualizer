@@ -2,6 +2,31 @@
 
 All notable changes to the "langgraph-visualizer" extension will be documented in this file.
 
+## [0.2.0] - 2025-11-23
+
+### 🎨 Visual Improvements
+- **New Professional Logo**: Redesigned extension icon with modern, polished look
+- **Enhanced README**: Complete redesign with banner, badges, and better organization
+- **Visual Documentation**: Added feature tables, examples, and better formatting
+
+### 📚 Documentation
+- **Interactive README**: Added comprehensive feature showcase with visual elements
+- **Better Examples**: Expanded code examples for simple, conditional, and multi-agent graphs
+- **Quick Start Guide**: Improved onboarding experience for new users
+- **Usage Tables**: Clear, structured information about interactions and features
+- **Contributing Guide**: Enhanced contribution workflow documentation
+
+### 🛠️ Developer Tools
+- **Icon Generation Scripts**: Added scripts for generating PNG icons from SVG
+- **Screenshot Directory**: Organized structure for demo images and GIFs
+- **Build Tools**: Improved build and package scripts
+
+### 🌟 Highlights
+- More accessible and beginner-friendly documentation
+- Professional branding and visual identity
+- Clear feature breakdown with examples
+- Better project organization
+
 ## [0.1.0] - 2025-10-15
 
 ### Added - Interactive Visualization! 🎉

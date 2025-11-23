@@ -65,7 +65,9 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
-    "lint": "eslint src --ext ts"
+    "lint": "eslint src --ext ts",
+    "generate-icons": "node scripts/generate-icons.js",
+    "package": "vsce package"
   },
   "devDependencies": {
     "@types/vscode": "^1.80.0",
