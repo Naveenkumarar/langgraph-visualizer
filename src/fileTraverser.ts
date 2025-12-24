@@ -61,6 +61,8 @@ export class FileTraverser {
                 if (subgraph) {
                     node.subgraph = subgraph;
                     node.hasSubgraph = true;
+                    // Propagate state from parent if subgraph has no state
+                    this.propagateState(graphStructure, node.subgraph);
                     continue;
                 }
 
@@ -70,6 +72,8 @@ export class FileTraverser {
                     if (importedGraph) {
                         node.subgraph = importedGraph;
                         node.hasSubgraph = true;
+                        // Propagate state from parent if subgraph has no state
+                        this.propagateState(graphStructure, node.subgraph);
                         continue;
                     }
                 }
@@ -81,6 +85,8 @@ export class FileTraverser {
                         node.subgraph = importedGraph;
                         node.hasSubgraph = true;
                         node.subgraph.parentGraph = node.id;
+                        // Propagate state from parent if subgraph has no state
+                        this.propagateState(graphStructure, node.subgraph);
                     }
                 }
             }
@@ -185,8 +191,20 @@ export class FileTraverser {
             }
 
             if (this.containsGraphCreation(functionBody)) {
+                // Parse function body for graph structure
                 const graph = GraphParser.parseText(functionBody);
                 graph.filePath = filePath;
+
+                // If no state found in function body, try to extract from full file
+                if (!graph.state || graph.state.length === 0) {
+                    this.debugLog(`No state found in function ${functionName}, checking full file`);
+                    const fullFileGraph = GraphParser.parseText(text);
+                    if (fullFileGraph.state && fullFileGraph.state.length > 0) {
+                        graph.state = fullFileGraph.state;
+                        graph.stateType = fullFileGraph.stateType;
+                        this.debugLog(`Found state in file: ${graph.state.length} fields`);
+                    }
+                }
 
                 // Find the function's starting line number in the file
                 const functionStartLine = this.findFunctionStartLine(text, functionName);
@@ -271,8 +289,20 @@ export class FileTraverser {
             }
 
             if (this.containsGraphCreation(functionBody)) {
+                // Parse function body for graph structure
                 const graph = GraphParser.parseText(functionBody);
                 graph.filePath = filePath;
+
+                // If no state found in function body, try to extract from full file
+                if (!graph.state || graph.state.length === 0) {
+                    this.debugLog(`No state found in imported function ${functionName}, checking full file ${filePath}`);
+                    const fullFileGraph = GraphParser.parseText(text);
+                    if (fullFileGraph.state && fullFileGraph.state.length > 0) {
+                        graph.state = fullFileGraph.state;
+                        graph.stateType = fullFileGraph.stateType;
+                        this.debugLog(`Found state in imported file: ${graph.state.length} fields`);
+                    }
+                }
 
                 // Find the function's starting line number in the file
                 const functionStartLine = this.findFunctionStartLine(text, functionName);
@@ -338,8 +368,22 @@ export class FileTraverser {
     private async processSubgraphs(graph: GraphStructure): Promise<void> {
         for (const node of graph.nodes) {
             if (node.subgraph) {
+                // Propagate state from parent to child if child has no state
+                this.propagateState(graph, node.subgraph);
                 await this.processSubgraphs(node.subgraph);
             }
+        }
+    }
+
+    /**
+     * Propagate state from parent graph to child graph if child has no state
+     */
+    private propagateState(parentGraph: GraphStructure, childGraph: GraphStructure): void {
+        if ((!childGraph.state || childGraph.state.length === 0) && 
+            parentGraph.state && parentGraph.state.length > 0) {
+            this.debugLog(`Propagating state from parent to child graph`);
+            childGraph.state = parentGraph.state;
+            childGraph.stateType = parentGraph.stateType;
         }
     }
 

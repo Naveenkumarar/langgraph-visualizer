@@ -716,40 +716,273 @@ export class GraphParser {
     }
 
     /**
+     * Infer state fields from usage patterns in the code
+     * Looks for patterns like: state["field"], state.get("field"), {"field": value}
+     */
+    private static inferStateFieldsFromUsage(text: string): StateField[] {
+        const fields: StateField[] = [];
+        const fieldMap = new Map<string, { type: string, values: Set<string> }>();
+
+        // Pattern 1: state["field_name"] = value or state["field_name"]
+        const bracketAccessPattern = /state\s*\[\s*["'](\w+)["']\s*\](?:\s*=\s*([^\n;]+))?/g;
+        let match;
+        
+        while ((match = bracketAccessPattern.exec(text)) !== null) {
+            const fieldName = match[1];
+            const assignedValue = match[2]?.trim();
+            
+            if (!fieldMap.has(fieldName)) {
+                fieldMap.set(fieldName, { type: 'any', values: new Set() });
+            }
+            
+            if (assignedValue) {
+                fieldMap.get(fieldName)!.values.add(assignedValue);
+                // Try to infer type from assigned value
+                const inferredType = this.inferTypeFromValue(assignedValue);
+                if (inferredType !== 'any') {
+                    fieldMap.get(fieldName)!.type = inferredType;
+                }
+            }
+        }
+
+        // Pattern 2: state.get("field_name", default)
+        const getMethodPattern = /state\.get\s*\(\s*["'](\w+)["'](?:\s*,\s*([^)]+))?\)/g;
+        
+        while ((match = getMethodPattern.exec(text)) !== null) {
+            const fieldName = match[1];
+            const defaultValue = match[2]?.trim();
+            
+            if (!fieldMap.has(fieldName)) {
+                fieldMap.set(fieldName, { type: 'any', values: new Set() });
+            }
+            
+            if (defaultValue) {
+                const inferredType = this.inferTypeFromValue(defaultValue);
+                if (inferredType !== 'any') {
+                    fieldMap.get(fieldName)!.type = inferredType;
+                }
+            }
+        }
+
+        // Pattern 3: Return statements with dict literals {"field": value}
+        const returnDictPattern = /return\s*\{([^}]+)\}/g;
+        
+        while ((match = returnDictPattern.exec(text)) !== null) {
+            const dictContent = match[1];
+            // Extract key-value pairs
+            const pairPattern = /["'](\w+)["']\s*:\s*([^,}]+)/g;
+            let pairMatch;
+            
+            while ((pairMatch = pairPattern.exec(dictContent)) !== null) {
+                const fieldName = pairMatch[1];
+                const value = pairMatch[2].trim();
+                
+                if (!fieldMap.has(fieldName)) {
+                    fieldMap.set(fieldName, { type: 'any', values: new Set() });
+                }
+                
+                fieldMap.get(fieldName)!.values.add(value);
+                const inferredType = this.inferTypeFromValue(value);
+                if (inferredType !== 'any') {
+                    fieldMap.get(fieldName)!.type = inferredType;
+                }
+            }
+        }
+
+        // Pattern 4: Dict spread with new fields {**state, "field": value}
+        const spreadDictPattern = /\{\s*\*\*\s*state\s*,([^}]+)\}/g;
+        
+        while ((match = spreadDictPattern.exec(text)) !== null) {
+            const newFields = match[1];
+            const pairPattern = /["'](\w+)["']\s*:\s*([^,}]+)/g;
+            let pairMatch;
+            
+            while ((pairMatch = pairPattern.exec(newFields)) !== null) {
+                const fieldName = pairMatch[1];
+                const value = pairMatch[2].trim();
+                
+                if (!fieldMap.has(fieldName)) {
+                    fieldMap.set(fieldName, { type: 'any', values: new Set() });
+                }
+                
+                fieldMap.get(fieldName)!.values.add(value);
+                const inferredType = this.inferTypeFromValue(value);
+                if (inferredType !== 'any') {
+                    fieldMap.get(fieldName)!.type = inferredType;
+                }
+            }
+        }
+
+        // Convert map to array
+        fieldMap.forEach((info, name) => {
+            fields.push({
+                name: name,
+                type: info.type,
+                annotation: 'inferred from usage'
+            });
+        });
+
+        // Sort fields alphabetically
+        fields.sort((a, b) => a.name.localeCompare(b.name));
+
+        return fields;
+    }
+
+    /**
+     * Infer type from a value string
+     */
+    private static inferTypeFromValue(value: string): string {
+        if (!value) {
+            return 'any';
+        }
+        
+        value = value.trim();
+        
+        // Boolean
+        if (value === 'True' || value === 'False') {
+            return 'bool';
+        }
+        
+        // None
+        if (value === 'None') {
+            return 'Optional';
+        }
+        
+        // String
+        if ((value.startsWith('"') && value.endsWith('"')) || 
+            (value.startsWith("'") && value.endsWith("'"))) {
+            return 'str';
+        }
+        
+        // f-string
+        if (value.startsWith('f"') || value.startsWith("f'")) {
+            return 'str';
+        }
+        
+        // List
+        if (value.startsWith('[')) {
+            return 'list';
+        }
+        
+        // Dict
+        if (value.startsWith('{')) {
+            return 'dict';
+        }
+        
+        // Tuple
+        if (value.startsWith('(')) {
+            return 'tuple';
+        }
+        
+        // Integer (check before float)
+        if (/^-?\d+$/.test(value)) {
+            return 'int';
+        }
+        
+        // Float
+        if (/^-?\d+\.\d+$/.test(value)) {
+            return 'float';
+        }
+        
+        // Function call that returns list
+        if (value.includes('list(') || value === '[]') {
+            return 'list';
+        }
+        
+        return 'any';
+    }
+
+    /**
      * Extract state definition from the code
      */
     private static extractStateDefinition(text: string): { fields: StateField[], type: string } {
         const fields: StateField[] = [];
         let stateType = 'Unknown';
 
+        // Helper to find class body end - stops at next class, def, or decorator at column 0
+        const findClassBodyEnd = (text: string, startIndex: number): number => {
+            const lines = text.substring(startIndex).split('\n');
+            let endIndex = startIndex;
+            let foundFirstLine = false;
+            
+            for (const line of lines) {
+                // Skip empty lines and the class definition line itself
+                if (!foundFirstLine) {
+                    if (line.trim() && !line.trim().startsWith('class ')) {
+                        foundFirstLine = true;
+                    }
+                    endIndex += line.length + 1;
+                    continue;
+                }
+                
+                // Check if line starts at column 0 (not indented) and is a definition
+                if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('\t')) {
+                    const trimmed = line.trim();
+                    if (trimmed.startsWith('def ') || 
+                        trimmed.startsWith('class ') || 
+                        trimmed.startsWith('@') ||
+                        trimmed.startsWith('async def ')) {
+                        break;
+                    }
+                }
+                endIndex += line.length + 1;
+            }
+            return endIndex;
+        };
+
         // Pattern 1: TypedDict state definition
         // e.g., class State(TypedDict):
         //           messages: list[str]
         //           user: str
-        const typedDictPattern = /class\s+(\w+)\s*\(TypedDict\):\s*([\s\S]*?)(?=\n(?:class|\ndef|$))/g;
+        const typedDictPattern = /class\s+(\w+)\s*\(\s*TypedDict\s*\)\s*:/g;
         let match = typedDictPattern.exec(text);
 
         if (match) {
             stateType = 'TypedDict';
             const stateClassName = match[1];
-            const classBody = match[2];
+            const classStartIndex = match.index + match[0].length;
+            const classEndIndex = findClassBodyEnd(text, classStartIndex);
+            const classBody = text.substring(classStartIndex, classEndIndex);
 
             console.log(`LangGraph Parser - Found TypedDict state: ${stateClassName}`);
+            console.log(`LangGraph Parser - Class body length: ${classBody.length}`);
 
-            // Extract field definitions: field_name: type
-            const fieldPattern = /^\s+(\w+)\s*:\s*([^\n#]+)/gm;
+            // Extract field definitions: field_name: type (handle both regular and Annotated types)
+            const fieldPattern = /^\s+(\w+)\s*:\s*(.+?)\s*$/gm;
             let fieldMatch;
 
             while ((fieldMatch = fieldPattern.exec(classBody)) !== null) {
                 const fieldName = fieldMatch[1];
-                const fieldType = fieldMatch[2].trim();
+                let fieldType = fieldMatch[2].trim();
+                
+                // Skip docstrings
+                if (fieldType.startsWith('"""') || fieldType.startsWith("'''")) {
+                    continue;
+                }
 
-                console.log(`LangGraph Parser - State field: ${fieldName}: ${fieldType}`);
-
-                fields.push({
-                    name: fieldName,
-                    type: fieldType
-                });
+                // Check if it's an Annotated type
+                const annotatedMatch = fieldType.match(/^Annotated\[(.+)\]$/);
+                if (annotatedMatch) {
+                    const annotationContent = annotatedMatch[1];
+                    const parts = annotationContent.split(',').map(s => s.trim());
+                    const baseType = parts[0];
+                    const annotations = parts.slice(1).join(', ');
+                    
+                    console.log(`LangGraph Parser - Annotated field: ${fieldName}: ${baseType} [${annotations}]`);
+                    
+                    fields.push({
+                        name: fieldName,
+                        type: baseType,
+                        annotation: annotations
+                    });
+                } else {
+                    console.log(`LangGraph Parser - State field: ${fieldName}: ${fieldType}`);
+                    
+                    fields.push({
+                        name: fieldName,
+                        type: fieldType
+                    });
+                }
             }
         }
 
@@ -757,87 +990,21 @@ export class GraphParser {
         // e.g., @dataclass
         //       class State:
         //           messages: list = field(default_factory=list)
-        const dataclassPattern = /@dataclass[\s\S]*?class\s+(\w+)(?:\([^)]*\))?:\s*([\s\S]*?)(?=\n(?:@|class|\ndef|$))/g;
-        match = dataclassPattern.exec(text);
+        if (fields.length === 0) {
+            const dataclassPattern = /@dataclass\s*\n\s*class\s+(\w+)(?:\s*\([^)]*\))?\s*:/g;
+            match = dataclassPattern.exec(text);
 
-        if (match) {
-            stateType = 'dataclass';
-            const stateClassName = match[1];
-            const classBody = match[2];
+            if (match) {
+                stateType = 'dataclass';
+                const stateClassName = match[1];
+                const classStartIndex = match.index + match[0].length;
+                const classEndIndex = findClassBodyEnd(text, classStartIndex);
+                const classBody = text.substring(classStartIndex, classEndIndex);
 
-            console.log(`LangGraph Parser - Found dataclass state: ${stateClassName}`);
+                console.log(`LangGraph Parser - Found dataclass state: ${stateClassName}`);
 
-            // Extract field definitions with optional defaults
-            // Pattern: field_name: type = default_value
-            // Or: field_name: type
-            const fieldPattern = /^\s+(\w+)\s*:\s*([^=\n]+)(?:\s*=\s*([^\n]+))?/gm;
-            let fieldMatch;
-
-            while ((fieldMatch = fieldPattern.exec(classBody)) !== null) {
-                const fieldName = fieldMatch[1];
-                const fieldType = fieldMatch[2].trim();
-                const defaultValue = fieldMatch[3] ? fieldMatch[3].trim() : undefined;
-
-                console.log(`LangGraph Parser - State field: ${fieldName}: ${fieldType}${defaultValue ? ` = ${defaultValue}` : ''}`);
-
-                fields.push({
-                    name: fieldName,
-                    type: fieldType,
-                    defaultValue: defaultValue
-                });
-            }
-        }
-
-        // Pattern 3: Annotated state with add_messages
-        // e.g., class State(TypedDict):
-        //           messages: Annotated[list, add_messages]
-        const annotatedPattern = /class\s+(\w+)\s*\((?:TypedDict|MessagesState)\):\s*([\s\S]*?)(?=\n(?:class|\ndef|$))/g;
-        match = annotatedPattern.exec(text);
-
-        if (match && fields.length === 0) {
-            stateType = match[0].includes('MessagesState') ? 'MessagesState' : 'TypedDict';
-            const stateClassName = match[1];
-            const classBody = match[2];
-
-            console.log(`LangGraph Parser - Found annotated state: ${stateClassName}`);
-
-            // Extract Annotated fields
-            const annotatedFieldPattern = /^\s+(\w+)\s*:\s*Annotated\[([^\]]+)\]/gm;
-            let fieldMatch;
-
-            while ((fieldMatch = annotatedFieldPattern.exec(classBody)) !== null) {
-                const fieldName = fieldMatch[1];
-                const annotationContent = fieldMatch[2].trim();
-                const [fieldType, ...annotations] = annotationContent.split(',').map(s => s.trim());
-
-                console.log(`LangGraph Parser - Annotated field: ${fieldName}: ${fieldType} [${annotations.join(', ')}]`);
-
-                fields.push({
-                    name: fieldName,
-                    type: fieldType,
-                    annotation: annotations.join(', ')
-                });
-            }
-        }
-
-        // Pattern 4: Direct StateGraph with state type parameter
-        // e.g., StateGraph(MessagesState) or StateGraph(State)
-        const stateGraphPattern = /StateGraph\s*\(\s*(\w+)\s*\)/g;
-        match = stateGraphPattern.exec(text);
-
-        if (match && fields.length === 0) {
-            const stateClassName = match[1];
-            console.log(`LangGraph Parser - Found StateGraph with state type: ${stateClassName}`);
-
-            // Try to find the state class definition elsewhere in the file
-            const stateClassPattern = new RegExp(`class\\s+${stateClassName}\\s*(?:\\([^)]*\\))?:\\s*([\\s\\S]*?)(?=\\n(?:class|\\ndef|$))`, 'g');
-            const classMatch = stateClassPattern.exec(text);
-
-            if (classMatch) {
-                const classBody = classMatch[1];
-
-                // Try to extract fields
-                const fieldPattern = /^\s+(\w+)\s*:\s*([^\n#]+?)(?:\s*=\s*([^\n]+))?$/gm;
+                // Extract field definitions with optional defaults
+                const fieldPattern = /^\s+(\w+)\s*:\s*([^=\n]+?)(?:\s*=\s*(.+?))?\s*$/gm;
                 let fieldMatch;
 
                 while ((fieldMatch = fieldPattern.exec(classBody)) !== null) {
@@ -845,22 +1012,162 @@ export class GraphParser {
                     const fieldType = fieldMatch[2].trim();
                     const defaultValue = fieldMatch[3] ? fieldMatch[3].trim() : undefined;
 
+                    // Skip docstrings
+                    if (fieldType.startsWith('"""') || fieldType.startsWith("'''")) {
+                        continue;
+                    }
+
+                    console.log(`LangGraph Parser - State field: ${fieldName}: ${fieldType}${defaultValue ? ` = ${defaultValue}` : ''}`);
+
                     fields.push({
                         name: fieldName,
                         type: fieldType,
                         defaultValue: defaultValue
                     });
                 }
+            }
+        }
 
-                // Detect state type from class definition
-                if (classBody.includes('TypedDict')) {
-                    stateType = 'TypedDict';
-                } else if (text.includes('@dataclass') && text.indexOf('@dataclass') < text.indexOf(`class ${stateClassName}`)) {
-                    stateType = 'dataclass';
-                } else if (classBody.includes('Annotated')) {
-                    stateType = 'Annotated State';
+        // Pattern 3: MessagesState (langgraph built-in)
+        // e.g., class State(MessagesState):
+        //           context: str
+        if (fields.length === 0) {
+            const messagesStatePattern = /class\s+(\w+)\s*\(\s*MessagesState\s*\)\s*:/g;
+            match = messagesStatePattern.exec(text);
+
+            if (match) {
+                stateType = 'MessagesState';
+                const stateClassName = match[1];
+                const classStartIndex = match.index + match[0].length;
+                const classEndIndex = findClassBodyEnd(text, classStartIndex);
+                const classBody = text.substring(classStartIndex, classEndIndex);
+
+                console.log(`LangGraph Parser - Found MessagesState: ${stateClassName}`);
+
+                // MessagesState has built-in 'messages' field
+                fields.push({
+                    name: 'messages',
+                    type: 'list[BaseMessage]',
+                    annotation: 'add_messages (inherited)'
+                });
+
+                // Extract additional field definitions
+                const fieldPattern = /^\s+(\w+)\s*:\s*(.+?)\s*$/gm;
+                let fieldMatch;
+
+                while ((fieldMatch = fieldPattern.exec(classBody)) !== null) {
+                    const fieldName = fieldMatch[1];
+                    let fieldType = fieldMatch[2].trim();
+                    
+                    // Skip docstrings
+                    if (fieldType.startsWith('"""') || fieldType.startsWith("'''")) {
+                        continue;
+                    }
+
+                    console.log(`LangGraph Parser - State field: ${fieldName}: ${fieldType}`);
+
+                    fields.push({
+                        name: fieldName,
+                        type: fieldType
+                    });
+                }
+            }
+        }
+
+        // Pattern 4: Direct StateGraph with state type parameter - find the class
+        // e.g., StateGraph(MessagesState) or StateGraph(State) or StateGraph(dict)
+        if (fields.length === 0) {
+            const stateGraphPattern = /StateGraph\s*\(\s*(\w+)\s*\)/;
+            match = stateGraphPattern.exec(text);
+
+            if (match) {
+                const stateClassName = match[1];
+                console.log(`LangGraph Parser - Found StateGraph with state type: ${stateClassName}`);
+
+                // Check for built-in Python types used as state
+                const builtinTypes = ['dict', 'Dict', 'list', 'List', 'tuple', 'Tuple', 'set', 'Set'];
+                
+                if (stateClassName === 'MessagesState') {
+                    stateType = 'MessagesState';
+                    fields.push({
+                        name: 'messages',
+                        type: 'list[BaseMessage]',
+                        annotation: 'add_messages'
+                    });
+                } else if (builtinTypes.includes(stateClassName)) {
+                    // Handle built-in types like dict - try to infer fields from usage
+                    stateType = stateClassName;
+                    console.log(`LangGraph Parser - State is built-in type: ${stateClassName}, inferring fields from usage`);
+                    
+                    // Infer state fields from dictionary access patterns in the code
+                    const inferredFields = this.inferStateFieldsFromUsage(text);
+                    if (inferredFields.length > 0) {
+                        fields.push(...inferredFields);
+                        console.log(`LangGraph Parser - Inferred ${inferredFields.length} state fields from usage`);
+                    } else {
+                        // If no fields inferred, add a placeholder to show the panel
+                        fields.push({
+                            name: '(dynamic)',
+                            type: 'any',
+                            annotation: 'No fixed schema - state is a plain ' + stateClassName
+                        });
+                    }
                 } else {
-                    stateType = 'State Class';
+                    // Try to find the state class definition elsewhere in the file
+                    const stateClassPattern = new RegExp(`class\\s+${stateClassName}\\s*(?:\\([^)]*\\))?\\s*:`, 'g');
+                    const classMatch = stateClassPattern.exec(text);
+
+                    if (classMatch) {
+                        const classStartIndex = classMatch.index + classMatch[0].length;
+                        const classEndIndex = findClassBodyEnd(text, classStartIndex);
+                        const classBody = text.substring(classStartIndex, classEndIndex);
+
+                        // Detect state type from class definition
+                        if (classMatch[0].includes('TypedDict')) {
+                            stateType = 'TypedDict';
+                        } else if (text.includes('@dataclass') && text.indexOf('@dataclass') < classMatch.index) {
+                            stateType = 'dataclass';
+                        } else {
+                            stateType = 'State Class';
+                        }
+
+                        // Try to extract fields
+                        const fieldPattern = /^\s+(\w+)\s*:\s*(.+?)(?:\s*=\s*(.+?))?\s*$/gm;
+                        let fieldMatch;
+
+                        while ((fieldMatch = fieldPattern.exec(classBody)) !== null) {
+                            const fieldName = fieldMatch[1];
+                            let fieldType = fieldMatch[2].trim();
+                            const defaultValue = fieldMatch[3] ? fieldMatch[3].trim() : undefined;
+                            
+                            // Skip docstrings
+                            if (fieldType.startsWith('"""') || fieldType.startsWith("'''")) {
+                                continue;
+                            }
+
+                            // Check for Annotated type
+                            const annotatedMatch = fieldType.match(/^Annotated\[(.+)\]$/);
+                            if (annotatedMatch) {
+                                const annotationContent = annotatedMatch[1];
+                                const parts = annotationContent.split(',').map(s => s.trim());
+                                const baseType = parts[0];
+                                const annotations = parts.slice(1).join(', ');
+                                
+                                fields.push({
+                                    name: fieldName,
+                                    type: baseType,
+                                    annotation: annotations,
+                                    defaultValue: defaultValue
+                                });
+                            } else {
+                                fields.push({
+                                    name: fieldName,
+                                    type: fieldType,
+                                    defaultValue: defaultValue
+                                });
+                            }
+                        }
+                    }
                 }
             }
         }
