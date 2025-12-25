@@ -3,12 +3,17 @@ import { GraphDetector } from './graphDetector';
 import { GraphParser } from './graphParser';
 import { WebviewProvider } from './webviewProvider';
 import { FileTraverser } from './fileTraverser';
+import { getDebugSession, DebugSession } from './debugSession';
 
 let statusBarItem: vscode.StatusBarItem;
+let debugSession: DebugSession;
 
 export function activate(context: vscode.ExtensionContext) {
 
-    // Create status bar item
+    // Initialize debug session
+    debugSession = getDebugSession();
+
+    // Create status bar item for visualization
     statusBarItem = vscode.window.createStatusBarItem(
         vscode.StatusBarAlignment.Right,
         100
@@ -17,6 +22,21 @@ export function activate(context: vscode.ExtensionContext) {
     statusBarItem.text = '$(graph) LangGraph';
     statusBarItem.tooltip = 'Show LangGraph Visualization';
     context.subscriptions.push(statusBarItem);
+
+    // Update webview with debug state changes
+    debugSession.onStateChange((state) => {
+        WebviewProvider.updateDebugState(state);
+    });
+
+    // Forward node updates to webview
+    debugSession.onNodeUpdate((nodeExec) => {
+        WebviewProvider.updateNodeExecution(nodeExec);
+    });
+
+    // Forward log entries to webview
+    debugSession.onLogEntry((logEntry) => {
+        WebviewProvider.addLogEntry(logEntry);
+    });
 
     // Function to load and display graph
     const loadAndDisplayGraph = async (document: vscode.TextDocument, showMessages: boolean = true) => {
@@ -108,6 +128,131 @@ export function activate(context: vscode.ExtensionContext) {
         }
     );
     context.subscriptions.push(showGraphCommand);
+
+    // Register debug commands
+    const toggleDebugCommand = vscode.commands.registerCommand(
+        'langgraph-visualizer.toggleDebug',
+        async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+                vscode.window.showErrorMessage('No active editor found');
+                return;
+            }
+
+            if (debugSession.isActive()) {
+                await debugSession.stop();
+            } else {
+                await debugSession.start(editor.document);
+            }
+        }
+    );
+    context.subscriptions.push(toggleDebugCommand);
+
+    const startDebugCommand = vscode.commands.registerCommand(
+        'langgraph-visualizer.startDebug',
+        async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+                vscode.window.showErrorMessage('No active editor found');
+                return;
+            }
+
+            if (!debugSession.isActive()) {
+                await debugSession.start(editor.document);
+            } else {
+                vscode.window.showWarningMessage('Debug session already active');
+            }
+        }
+    );
+    context.subscriptions.push(startDebugCommand);
+
+    const startDebugWithPathCommand = vscode.commands.registerCommand(
+        'langgraph-visualizer.startDebugWithPath',
+        async (pythonPath?: string) => {
+            // Try to get document from webview first, then fall back to active editor
+            let document = WebviewProvider.getCurrentDocument();
+            
+            if (!document) {
+                const editor = vscode.window.activeTextEditor;
+                if (editor) {
+                    document = editor.document;
+                }
+            }
+            
+            if (!document) {
+                vscode.window.showErrorMessage('No Python file found. Please open a Python file first.');
+                return;
+            }
+
+            if (pythonPath) {
+                debugSession.setPythonPath(pythonPath);
+            }
+
+            if (!debugSession.isActive()) {
+                await debugSession.start(document);
+            } else {
+                vscode.window.showWarningMessage('Debug session already active');
+            }
+        }
+    );
+    context.subscriptions.push(startDebugWithPathCommand);
+
+    const setPythonPathCommand = vscode.commands.registerCommand(
+        'langgraph-visualizer.setPythonPath',
+        async (pythonPath: string) => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+                return;
+            }
+
+            if (debugSession.isActive()) {
+                debugSession.restartWithPythonPath(pythonPath, editor.document);
+            } else {
+                debugSession.setPythonPath(pythonPath);
+            }
+        }
+    );
+    context.subscriptions.push(setPythonPathCommand);
+
+    const stopDebugCommand = vscode.commands.registerCommand(
+        'langgraph-visualizer.stopDebug',
+        async () => {
+            await debugSession.stop();
+        }
+    );
+    context.subscriptions.push(stopDebugCommand);
+
+    const pauseDebugCommand = vscode.commands.registerCommand(
+        'langgraph-visualizer.pauseDebug',
+        () => {
+            debugSession.pause();
+        }
+    );
+    context.subscriptions.push(pauseDebugCommand);
+
+    const resumeDebugCommand = vscode.commands.registerCommand(
+        'langgraph-visualizer.resumeDebug',
+        () => {
+            debugSession.resume();
+        }
+    );
+    context.subscriptions.push(resumeDebugCommand);
+
+    const stepDebugCommand = vscode.commands.registerCommand(
+        'langgraph-visualizer.stepDebug',
+        () => {
+            debugSession.step();
+        }
+    );
+    context.subscriptions.push(stepDebugCommand);
+
+    const toggleBreakpointCommand = vscode.commands.registerCommand(
+        'langgraph-visualizer.toggleBreakpoint',
+        (nodeId: string) => {
+            debugSession.toggleBreakpoint(nodeId);
+        }
+    );
+    context.subscriptions.push(toggleBreakpointCommand);
 
     // Update status bar when editor changes
     context.subscriptions.push(
@@ -214,6 +359,9 @@ function countTotalFilesRecursive(graph: any, files: Set<string>): void {
 export function deactivate() {
     if (statusBarItem) {
         statusBarItem.dispose();
+    }
+    if (debugSession) {
+        debugSession.stop();
     }
 }
 

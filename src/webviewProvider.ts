@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { GraphStructure } from './graphParser';
+import { DebugSessionState, NodeExecution, ExecutionLogEntry } from './debugSession';
 
 /**
  * Provides webview panel for graph visualization
@@ -10,6 +11,14 @@ export class WebviewProvider {
     private static fileWatcher: vscode.FileSystemWatcher | undefined;
     private static context: vscode.ExtensionContext | undefined;
     private static refreshCallback: (() => Promise<void>) | undefined;
+    private static debugState: DebugSessionState | undefined;
+
+    /**
+     * Get the current document being visualized
+     */
+    public static getCurrentDocument(): vscode.TextDocument | undefined {
+        return WebviewProvider.currentDocument;
+    }
 
     /**
      * Show the graph visualization in a webview panel
@@ -135,6 +144,22 @@ export class WebviewProvider {
                                 });
                             }
                             break;
+                        
+                        // Debug commands from webview
+                        case 'debugStop':
+                            vscode.commands.executeCommand('langgraph-visualizer.stopDebug');
+                            break;
+                        case 'debugStart':
+                            vscode.commands.executeCommand('langgraph-visualizer.startDebugWithPath', message.pythonPath);
+                            break;
+                        case 'setPythonPath':
+                            vscode.commands.executeCommand('langgraph-visualizer.setPythonPath', message.pythonPath);
+                            break;
+                        case 'toggleBreakpoint':
+                            if (message.nodeId) {
+                                vscode.commands.executeCommand('langgraph-visualizer.toggleBreakpoint', message.nodeId);
+                            }
+                            break;
                     }
                 },
                 undefined,
@@ -216,6 +241,53 @@ export class WebviewProvider {
             setTimeout(() => {
                 WebviewProvider.currentPanel!.webview.html = this.getWebviewContent(graphData);
             }, 100);
+        }
+    }
+
+    /**
+     * Update debug state in the webview
+     */
+    public static updateDebugState(state: DebugSessionState): void {
+        WebviewProvider.debugState = state;
+        if (WebviewProvider.currentPanel) {
+            WebviewProvider.currentPanel.webview.postMessage({
+                command: 'debugStateUpdate',
+                state: {
+                    isActive: state.isActive,
+                    executionState: state.executionState,
+                    currentNode: state.currentNode,
+                    currentState: state.currentState,
+                    initialInput: state.initialInput,
+                    finalOutput: state.finalOutput,
+                    breakpoints: Array.from(state.breakpoints),
+                    port: state.port,
+                    pythonPath: state.pythonPath
+                }
+            });
+        }
+    }
+
+    /**
+     * Update node execution in the webview
+     */
+    public static updateNodeExecution(nodeExec: NodeExecution): void {
+        if (WebviewProvider.currentPanel) {
+            WebviewProvider.currentPanel.webview.postMessage({
+                command: 'nodeExecutionUpdate',
+                nodeExecution: nodeExec
+            });
+        }
+    }
+
+    /**
+     * Add log entry to the webview
+     */
+    public static addLogEntry(logEntry: ExecutionLogEntry): void {
+        if (WebviewProvider.currentPanel) {
+            WebviewProvider.currentPanel.webview.postMessage({
+                command: 'addLogEntry',
+                logEntry: logEntry
+            });
         }
     }
 
@@ -463,6 +535,21 @@ export class WebviewProvider {
             background-color: var(--vscode-editor-background);
             border-radius: 3px;
             border-left: 3px solid var(--vscode-button-background);
+            transition: border-color 0.3s ease;
+        }
+
+        .state-field-value.live-value {
+            color: var(--vscode-charts-green);
+            font-weight: 500;
+        }
+
+        .state-field-value.value-updated {
+            animation: valueFlash 0.5s ease;
+        }
+
+        @keyframes valueFlash {
+            0% { background-color: var(--vscode-charts-green); }
+            100% { background-color: transparent; }
         }
 
         .state-field-header {
@@ -800,6 +887,421 @@ export class WebviewProvider {
                 transform: rotate(360deg);
             }
         }
+
+        /* Debug Controls Bar (separate line) */
+        .debug-controls-bar {
+            background-color: var(--vscode-editor-inactiveSelectionBackground);
+            border-bottom: 1px solid var(--vscode-panel-border);
+            padding: 10px 20px;
+            flex-shrink: 0;
+        }
+
+        .debug-controls-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 15px;
+        }
+
+        .debug-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+        }
+
+        .debug-center {
+            display: flex;
+            align-items: center;
+        }
+
+        .debug-right {
+            display: flex;
+            align-items: center;
+        }
+
+        .debug-label {
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--vscode-foreground);
+        }
+
+        .debug-buttons {
+            display: flex;
+            gap: 4px;
+        }
+
+        .env-label {
+            font-size: 14px;
+        }
+
+        .python-path-input-header {
+            background-color: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            border: 1px solid var(--vscode-input-border);
+            padding: 6px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+            flex: 1;
+            min-width: 200px;
+            max-width: 400px;
+            font-family: var(--vscode-editor-font-family);
+        }
+
+        .python-path-input-header:focus {
+            border-color: var(--vscode-focusBorder);
+            outline: none;
+        }
+
+        .python-path-input-header:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            background-color: var(--vscode-input-background);
+        }
+
+        /* Debug Info Row (shown when active) */
+        .debug-info-row {
+            display: none;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--vscode-panel-border);
+            font-size: 12px;
+        }
+
+        .debug-info-row.visible {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .env-separator {
+            color: var(--vscode-panel-border);
+        }
+
+        .port-info {
+            color: var(--vscode-descriptionForeground);
+        }
+
+        .current-node {
+            color: var(--vscode-foreground);
+        }
+
+        .current-node strong {
+            color: var(--vscode-textLink-foreground);
+        }
+
+        .debug-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .debug-status.stopped {
+            background-color: var(--vscode-statusBarItem-errorBackground, #6c2022);
+            color: var(--vscode-statusBarItem-errorForeground, #fff);
+        }
+
+        .debug-status.running {
+            background-color: var(--vscode-statusBarItem-prominentBackground, #388a34);
+            color: var(--vscode-statusBarItem-prominentForeground, #fff);
+        }
+
+        .debug-status.paused {
+            background-color: var(--vscode-statusBarItem-warningBackground, #c9a700);
+            color: var(--vscode-statusBarItem-warningForeground, #000);
+        }
+
+        .debug-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: currentColor;
+        }
+
+        .debug-status.running .debug-status-dot {
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .debug-controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        .debug-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border-radius: 4px;
+            font-size: 16px;
+            background-color: var(--vscode-button-secondaryBackground);
+            color: var(--vscode-button-secondaryForeground);
+        }
+
+        .debug-btn:hover {
+            background-color: var(--vscode-button-secondaryHoverBackground);
+        }
+
+        .debug-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .debug-btn.primary {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+        }
+
+        .debug-btn.danger {
+            background-color: var(--vscode-statusBarItem-errorBackground, #6c2022);
+            color: #fff;
+        }
+
+        /* Execution Log Panel */
+        #executionLog {
+            position: absolute;
+            bottom: 60px;
+            left: 10px;
+            background-color: var(--vscode-editor-inactiveSelectionBackground);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+            width: 350px;
+            max-height: 300px;
+            display: none;
+            flex-direction: column;
+        }
+
+        #executionLog.visible {
+            display: flex;
+        }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            background-color: var(--vscode-editor-background);
+            cursor: pointer;
+        }
+
+        .log-header h4 {
+            margin: 0;
+            font-size: 12px;
+        }
+
+        .log-content {
+            flex: 1;
+            overflow-y: auto;
+            max-height: 250px;
+            padding: 8px 0;
+        }
+
+        .log-entry {
+            padding: 4px 12px;
+            font-family: var(--vscode-editor-font-family);
+            font-size: 11px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+        }
+
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+
+        .log-entry.node_start {
+            color: var(--vscode-charts-green, #4CAF50);
+        }
+
+        .log-entry.node_end {
+            color: var(--vscode-charts-blue, #2196F3);
+        }
+
+        .log-entry.error {
+            color: var(--vscode-errorForeground, #F44336);
+        }
+
+        .log-entry.info {
+            color: var(--vscode-descriptionForeground);
+        }
+
+        .log-timestamp {
+            color: var(--vscode-descriptionForeground);
+            font-size: 10px;
+            margin-right: 8px;
+        }
+
+        /* Live State Panel */
+        #liveStatePanel {
+            position: absolute;
+            top: 60px;
+            right: 10px;
+            background-color: var(--vscode-editor-inactiveSelectionBackground);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 1001;
+            backdrop-filter: blur(10px);
+            min-width: 280px;
+            max-width: 400px;
+            max-height: 300px;
+            display: none;
+            flex-direction: column;
+        }
+
+        #liveStatePanel.visible {
+            display: flex;
+        }
+
+        .live-state-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            background-color: var(--vscode-editor-background);
+        }
+
+        .live-state-header h4 {
+            margin: 0;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .live-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #4CAF50;
+            animation: pulse 1.5s infinite;
+        }
+
+        .live-state-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 12px;
+            font-family: var(--vscode-editor-font-family);
+        }
+
+        .live-state-content pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-all;
+            font-size: 11px;
+        }
+
+        /* Node running animation - bright pulsing effect */
+        .node-running {
+            animation: nodeRunning 0.8s ease-in-out infinite !important;
+            box-shadow: 0 0 20px 10px #FFD700 !important;
+        }
+
+        @keyframes nodeRunning {
+            0%, 100% {
+                box-shadow: 0 0 10px 5px rgba(76, 175, 80, 0.5);
+            }
+            50% {
+                box-shadow: 0 0 20px 10px rgba(76, 175, 80, 0.8);
+            }
+        }
+
+        /* Breakpoint indicator */
+        .breakpoint {
+            border: 3px solid #F44336 !important;
+        }
+
+        .breakpoint::before {
+            content: '🔴';
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            font-size: 10px;
+        }
+
+        /* Input/Output Panel */
+        #ioPanel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: var(--vscode-editor-inactiveSelectionBackground);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 1001;
+            backdrop-filter: blur(10px);
+            min-width: 280px;
+            max-width: 400px;
+            display: none;
+            flex-direction: column;
+        }
+
+        #ioPanel.visible {
+            display: flex;
+        }
+
+        .io-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            background-color: var(--vscode-editor-background);
+        }
+
+        .io-header h4 {
+            margin: 0;
+            font-size: 12px;
+        }
+
+        .io-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--vscode-panel-border);
+        }
+
+        .io-tab {
+            flex: 1;
+            padding: 8px;
+            text-align: center;
+            cursor: pointer;
+            background: transparent;
+            border: none;
+            color: var(--vscode-foreground);
+            font-size: 11px;
+        }
+
+        .io-tab.active {
+            background-color: var(--vscode-editor-background);
+            border-bottom: 2px solid var(--vscode-button-background);
+        }
+
+        .io-content {
+            padding: 8px 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: var(--vscode-editor-font-family);
+        }
+
+        .io-content pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-all;
+            font-size: 11px;
+        }
     </style>
 </head>
 <body>
@@ -834,8 +1336,73 @@ export class WebviewProvider {
             </div>
         </div>
     </div>
+
+    <!-- Debug Controls Bar (separate line) -->
+    <div id="debugControlsBar" class="debug-controls-bar">
+        <div class="debug-controls-content">
+            <div class="debug-left">
+                <span class="debug-label">🔬 Debug</span>
+                <span class="env-label">🐍</span>
+                <input type="text" id="pythonPathInput" class="python-path-input-header" placeholder="python or /path/to/venv/bin/python" value="python" title="Enter Python interpreter path">
+            </div>
+            <div class="debug-center">
+                <span class="debug-status stopped" id="debugStatus">
+                    <span class="debug-status-dot"></span>
+                    <span id="debugStatusText">Ready</span>
+                </span>
+            </div>
+            <div class="debug-right">
+                <div class="debug-buttons">
+                    <button class="debug-btn primary" id="debugStartBtn" title="Start Debug Session">▶ Start</button>
+                    <button class="debug-btn danger" id="debugStopBtn" title="Stop" disabled>⏹ Stop</button>
+                </div>
+            </div>
+        </div>
+        <!-- Debug Info (shown when active) -->
+        <div id="debugInfoRow" class="debug-info-row">
+            <span id="debugPort" class="port-info">Port: -</span>
+            <span class="env-separator">|</span>
+            <span id="debugCurrentNode" class="current-node">Node: <strong>-</strong></span>
+        </div>
+    </div>
     
     <div id="cy">
+        <!-- Input/Output Panel -->
+        <div id="ioPanel">
+            <div class="io-header">
+                <h4>📥 Input / Output</h4>
+                <button class="copy-state-btn" id="copyIOBtn" title="Copy">📋</button>
+            </div>
+            <div class="io-tabs">
+                <button class="io-tab active" data-tab="input">Input</button>
+                <button class="io-tab" data-tab="output">Output</button>
+            </div>
+            <div class="io-content">
+                <pre id="ioContent">No data yet</pre>
+            </div>
+        </div>
+
+        <!-- Live State Panel -->
+        <div id="liveStatePanel">
+            <div class="live-state-header">
+                <h4><span class="live-indicator"></span> Live State</h4>
+            </div>
+            <div class="live-state-content">
+                <pre id="liveStateContent">Waiting for execution...</pre>
+            </div>
+        </div>
+
+        <!-- Execution Log -->
+        <div id="executionLog">
+            <div class="log-header">
+                <h4>📜 Execution Log</h4>
+                <button class="copy-state-btn" id="clearLogBtn" title="Clear Log">🗑️</button>
+            </div>
+            <div class="log-content" id="logContent">
+                <div class="log-entry info">Waiting for debug session...</div>
+            </div>
+        </div>
+
         <div id="statePanel" class="${graphData.state && graphData.state.length > 0 ? '' : 'hidden'}">
             <div class="state-header" id="statePanelHeader">
                 <h3>
@@ -966,6 +1533,20 @@ export class WebviewProvider {
     <script>
         const vscode = acquireVsCodeApi();
         
+        // Debug state tracking
+        let debugState = {
+            isActive: false,
+            executionState: 'stopped',
+            currentNode: null,
+            currentState: null,
+            initialInput: null,
+            finalOutput: null,
+            breakpoints: [],
+            port: 0,
+            pythonPath: 'python'
+        };
+        let currentIOTab = 'input';
+        
         // Handle messages from extension
         window.addEventListener('message', event => {
             const message = event.data;
@@ -992,8 +1573,267 @@ export class WebviewProvider {
                 case 'clipboardCopyError':
                     alert('Failed to copy state to clipboard: ' + (message.error || 'Unknown error'));
                     break;
+                    
+                // Debug state updates
+                case 'debugStateUpdate':
+                    debugState = message.state;
+                    updateDebugUI();
+                    break;
+                    
+                case 'nodeExecutionUpdate':
+                    updateNodeExecution(message.nodeExecution);
+                    break;
+                    
+                case 'addLogEntry':
+                    addLogEntryToUI(message.logEntry);
+                    break;
             }
         });
+        
+        // Update debug UI based on state
+        function updateDebugUI() {
+            const debugInfoRow = document.getElementById('debugInfoRow');
+            const debugStatus = document.getElementById('debugStatus');
+            const debugStatusText = document.getElementById('debugStatusText');
+            const debugPort = document.getElementById('debugPort');
+            const debugCurrentNode = document.getElementById('debugCurrentNode');
+            const executionLog = document.getElementById('executionLog');
+            const liveStatePanel = document.getElementById('liveStatePanel');
+            const ioPanel = document.getElementById('ioPanel');
+            const pythonPathInput = document.getElementById('pythonPathInput');
+            const debugStartBtn = document.getElementById('debugStartBtn');
+            
+            // Show/hide debug info row and panels, disable input while running
+            if (debugState.isActive) {
+                debugInfoRow.classList.add('visible');
+                executionLog.classList.add('visible');
+                debugStartBtn.textContent = '▶ Running';
+                debugStartBtn.disabled = true;
+                pythonPathInput.disabled = true;
+                pythonPathInput.title = 'Stop debug session to change Python path';
+            } else {
+                debugInfoRow.classList.remove('visible');
+                executionLog.classList.remove('visible');
+                liveStatePanel.classList.remove('visible');
+                ioPanel.classList.remove('visible');
+                debugStartBtn.textContent = '▶ Start';
+                debugStartBtn.disabled = false;
+                pythonPathInput.disabled = false;
+                pythonPathInput.title = 'Enter Python interpreter path';
+            }
+            
+            // Update status
+            debugStatus.className = 'debug-status ' + debugState.executionState;
+            const statusLabels = {
+                'stopped': 'Ready',
+                'running': 'Running',
+                'paused': 'Paused',
+                'stepping': 'Stepping'
+            };
+            debugStatusText.textContent = statusLabels[debugState.executionState] || debugState.executionState;
+            
+            // Update port
+            if (debugState.port) {
+                debugPort.textContent = 'Port: ' + debugState.port;
+            } else {
+                debugPort.textContent = 'Port: -';
+            }
+            
+            // Update current node
+            if (debugState.currentNode) {
+                debugCurrentNode.innerHTML = 'Node: <strong>' + debugState.currentNode + '</strong>';
+                highlightCurrentNode(debugState.currentNode);
+            } else {
+                debugCurrentNode.innerHTML = 'Node: <strong>-</strong>';
+                clearNodeHighlight();
+            }
+            
+            // Update buttons
+            document.getElementById('debugStopBtn').disabled = !debugState.isActive;
+            
+            // Update live state panel
+            if (debugState.currentState) {
+                liveStatePanel.classList.add('visible');
+                document.getElementById('liveStateContent').textContent = JSON.stringify(debugState.currentState, null, 2);
+                
+                // Also update the static state panel with live values
+                updateStatePanelWithLiveValues(debugState.currentState);
+            }
+            
+            // Update I/O panel
+            if (debugState.initialInput || debugState.finalOutput) {
+                ioPanel.classList.add('visible');
+                updateIOPanel();
+            }
+        }
+        
+        // Highlight current executing node
+        function highlightCurrentNode(nodeId) {
+            if (typeof cy !== 'undefined' && cy) {
+                // Remove previous highlight
+                cy.nodes().removeClass('node-running');
+                
+                // Find and highlight node - try exact match first
+                let node = cy.getElementById(nodeId);
+                
+                // If not found, try case-insensitive match or partial match
+                if (node.length === 0) {
+                    const lowerNodeId = nodeId.toLowerCase();
+                    node = cy.nodes().filter(n => {
+                        const id = n.id().toLowerCase();
+                        const label = (n.data('label') || '').toLowerCase();
+                        return id === lowerNodeId || 
+                               label === lowerNodeId ||
+                               id.includes(lowerNodeId) || 
+                               lowerNodeId.includes(id);
+                    });
+                }
+                
+                if (node.length > 0) {
+                    node.addClass('node-running');
+                    // Pan to node
+                    cy.animate({
+                        center: { eles: node },
+                        duration: 300
+                    });
+                    console.log('Highlighting node:', nodeId, node.id());
+                } else {
+                    console.log('Node not found for highlighting:', nodeId);
+                }
+            }
+        }
+        
+        // Clear node highlight
+        function clearNodeHighlight() {
+            if (typeof cy !== 'undefined' && cy) {
+                cy.nodes().removeClass('node-running');
+            }
+        }
+        
+        // Update node execution status
+        function updateNodeExecution(nodeExec) {
+            if (typeof cy !== 'undefined' && cy) {
+                const node = cy.getElementById(nodeExec.nodeId);
+                if (node.length > 0) {
+                    if (nodeExec.status === 'running') {
+                        node.addClass('node-running');
+                    } else if (nodeExec.status === 'completed') {
+                        node.removeClass('node-running');
+                        // Flash green briefly
+                        node.style('background-color', '#4CAF50');
+                        setTimeout(() => {
+                            node.removeStyle('background-color');
+                        }, 500);
+                    } else if (nodeExec.status === 'error') {
+                        node.removeClass('node-running');
+                        node.style('background-color', '#F44336');
+                    }
+                }
+            }
+        }
+        
+        // Update state panel with live values
+        function updateStatePanelWithLiveValues(liveState) {
+            if (!liveState || typeof liveState !== 'object') return;
+            
+            const statePanel = document.getElementById('statePanel');
+            if (!statePanel) return;
+            
+            // Normalize the state - extract actual state object if it's nested
+            let normalizedState = liveState;
+            
+            // If it's an array, look for an object with expected state keys
+            if (Array.isArray(liveState)) {
+                for (const item of liveState) {
+                    if (item && typeof item === 'object' && !Array.isArray(item)) {
+                        normalizedState = item;
+                        break;
+                    }
+                }
+            }
+            
+            // If state has numeric keys (like '0', '1'), try to find nested state object
+            const keys = Object.keys(normalizedState);
+            const hasNumericKeys = keys.every(k => /^\\d+$/.test(k));
+            if (hasNumericKeys && keys.length > 0) {
+                // Look for the first object value that looks like actual state
+                for (const value of Object.values(normalizedState)) {
+                    if (value && typeof value === 'object' && !Array.isArray(value)) {
+                        const valueKeys = Object.keys(value);
+                        // Check if this object has non-numeric keys (actual state fields)
+                        if (valueKeys.length > 0 && !valueKeys.every(k => /^\\d+$/.test(k))) {
+                            normalizedState = value;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Show state panel if hidden
+            statePanel.classList.remove('hidden');
+            
+            // Update each field with its live value
+            const stateFields = statePanel.querySelectorAll('.state-field');
+            stateFields.forEach(field => {
+                const fieldName = field.getAttribute('data-field-name');
+                if (fieldName && normalizedState.hasOwnProperty(fieldName)) {
+                    const valueDiv = field.querySelector('.state-field-value');
+                    if (valueDiv) {
+                        const value = normalizedState[fieldName];
+                        let displayValue;
+                        if (value === null || value === undefined) {
+                            displayValue = String(value);
+                        } else if (typeof value === 'object') {
+                            displayValue = JSON.stringify(value, null, 2);
+                        } else {
+                            displayValue = String(value);
+                        }
+                        valueDiv.textContent = displayValue;
+                        valueDiv.classList.add('live-value');
+                        
+                        // Add flash effect
+                        valueDiv.classList.add('value-updated');
+                        setTimeout(() => valueDiv.classList.remove('value-updated'), 500);
+                    }
+                }
+            });
+            
+            // Only update existing fields from schema, don't add new ones
+        }
+        
+        // Add log entry to UI
+        function addLogEntryToUI(logEntry) {
+            const logContent = document.getElementById('logContent');
+            const timestamp = new Date(logEntry.timestamp).toLocaleTimeString();
+            
+            const entryDiv = document.createElement('div');
+            entryDiv.className = 'log-entry ' + logEntry.type;
+            entryDiv.innerHTML = '<span class="log-timestamp">' + timestamp + '</span>' + logEntry.message;
+            
+            logContent.appendChild(entryDiv);
+            
+            // Scroll to bottom
+            logContent.scrollTop = logContent.scrollHeight;
+            
+            // Keep log limited to 100 entries
+            while (logContent.children.length > 100) {
+                logContent.removeChild(logContent.firstChild);
+            }
+        }
+        
+        // Update I/O panel
+        function updateIOPanel() {
+            const ioContent = document.getElementById('ioContent');
+            if (currentIOTab === 'input') {
+                ioContent.textContent = debugState.initialInput 
+                    ? JSON.stringify(debugState.initialInput, null, 2)
+                    : 'No input data';
+            } else {
+                ioContent.textContent = debugState.finalOutput 
+                    ? JSON.stringify(debugState.finalOutput, null, 2)
+                    : 'No output yet';
+            }
+        }
         
         // Graph data
         const cytoscapeElements = ${JSON.stringify(cytoscapeData)};
@@ -1308,6 +2148,19 @@ export class WebviewProvider {
                         'border-width': '4px',
                         'border-style': 'solid',
                         'shape': 'rectangle'
+                    }
+                },
+                {
+                    selector: '.node-running',
+                    style: {
+                        'background-color': '#FFD700',
+                        'border-color': '#FFA500',
+                        'border-width': '6px',
+                        'width': '100px',
+                        'height': '100px',
+                        'font-size': '16px',
+                        'overlay-color': '#FFD700',
+                        'overlay-opacity': 0.3
                     }
                 }
             ],
@@ -1625,6 +2478,60 @@ export class WebviewProvider {
                 // Don't collapse if clicking the copy button
                 if (e.target.id !== 'copyStateBtn' && !e.target.closest('#copyStateBtn')) {
                     statePanel.classList.toggle('collapsed');
+                }
+            });
+        }
+
+        // Debug button event listeners
+        document.getElementById('debugStartBtn')?.addEventListener('click', () => {
+            // Get python path from input before starting
+            const pythonPathInput = document.getElementById('pythonPathInput');
+            const pythonPath = pythonPathInput ? pythonPathInput.value.trim() || 'python' : 'python';
+            vscode.postMessage({ command: 'debugStart', pythonPath: pythonPath });
+        });
+        
+        document.getElementById('debugStopBtn')?.addEventListener('click', () => {
+            vscode.postMessage({ command: 'debugStop' });
+        });
+        
+        // Enter key on python path input starts debug
+        document.getElementById('pythonPathInput')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !debugState.isActive) {
+                const pythonPath = e.target.value.trim() || 'python';
+                vscode.postMessage({ command: 'debugStart', pythonPath: pythonPath });
+            }
+        });
+        
+        // Clear log button
+        document.getElementById('clearLogBtn')?.addEventListener('click', () => {
+            const logContent = document.getElementById('logContent');
+            if (logContent) {
+                logContent.innerHTML = '<div class="log-entry info">Log cleared</div>';
+            }
+        });
+        
+        // I/O tab switching
+        document.querySelectorAll('.io-tab').forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                document.querySelectorAll('.io-tab').forEach(t => t.classList.remove('active'));
+                e.target.classList.add('active');
+                currentIOTab = e.target.getAttribute('data-tab');
+                updateIOPanel();
+            });
+        });
+        
+        // Double-click on node to toggle breakpoint
+        if (typeof cy !== 'undefined' && cy) {
+            cy.on('dbltap', 'node', function(evt) {
+                const nodeId = evt.target.id();
+                vscode.postMessage({ command: 'toggleBreakpoint', nodeId: nodeId });
+                
+                // Visual feedback
+                const node = evt.target;
+                if (node.hasClass('breakpoint')) {
+                    node.removeClass('breakpoint');
+                } else {
+                    node.addClass('breakpoint');
                 }
             });
         }
