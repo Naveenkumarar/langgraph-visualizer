@@ -39,6 +39,22 @@ export interface ExecutionLogEntry {
 }
 
 /**
+ * Time Capsule step - represents one step in execution history
+ */
+export interface TimeCapsuleStep {
+    step: number;
+    node: string;
+    type: 'input' | 'node' | 'output';
+    input: any;
+    output: any;
+    state_before: any;
+    state_after: any;
+    duration?: number;
+    timestamp: string;
+    error?: string;
+}
+
+/**
  * Debug session state
  */
 export interface DebugSessionState {
@@ -54,6 +70,9 @@ export interface DebugSessionState {
     startTime: number | null;
     port: number;
     pythonPath: string;
+    timeCapsule: TimeCapsuleStep[];
+    timeCapsuleIndex: number;
+    timeCapsuleActive: boolean;
 }
 
 /**
@@ -105,7 +124,10 @@ export class DebugSession {
             breakpoints: new Set(),
             startTime: null,
             port: 0,
-            pythonPath: defaultPythonPath
+            pythonPath: defaultPythonPath,
+            timeCapsule: [],
+            timeCapsuleIndex: 0,
+            timeCapsuleActive: false
         };
     }
     
@@ -196,8 +218,19 @@ export class DebugSession {
             this.terminal = null;
         }
         
+        // Preserve time capsule data before resetting state
+        const preservedCapsule = this.state.timeCapsule;
+        const preservedCapsuleIndex = this.state.timeCapsuleIndex;
+        const preservedCapsuleActive = this.state.timeCapsuleActive;
+        
         // Reset state
         this.state = this.createInitialState();
+        
+        // Restore time capsule data
+        this.state.timeCapsule = preservedCapsule;
+        this.state.timeCapsuleIndex = preservedCapsuleIndex;
+        this.state.timeCapsuleActive = preservedCapsuleActive;
+        
         this.addLogEntry('info', 'Debug session stopped');
         
         this._onStateChange.fire(this.state);
@@ -256,6 +289,99 @@ export class DebugSession {
             this.addLogEntry('info', `Breakpoint set on ${nodeId}`);
             return true;
         }
+    }
+    
+    // ============== Time Capsule Methods ==============
+    
+    /**
+     * Activate the time capsule for navigation
+     */
+    activateTimeCapsule(): void {
+        if (this.state.timeCapsule.length === 0) {
+            vscode.window.showWarningMessage('No Time Capsule data available. Run the graph first.');
+            return;
+        }
+        
+        this.state.timeCapsuleActive = true;
+        this.state.timeCapsuleIndex = 0;
+        this.addLogEntry('info', 'Time Capsule activated');
+        this._onStateChange.fire(this.state);
+    }
+    
+    /**
+     * Deactivate the time capsule
+     */
+    deactivateTimeCapsule(): void {
+        this.state.timeCapsuleActive = false;
+        this.state.currentNode = null;
+        this.addLogEntry('info', 'Time Capsule deactivated');
+        this._onStateChange.fire(this.state);
+    }
+    
+    /**
+     * Navigate to next step in time capsule
+     */
+    timeCapsuleNext(): void {
+        if (!this.state.timeCapsuleActive || this.state.timeCapsule.length === 0) {
+            return;
+        }
+        
+        if (this.state.timeCapsuleIndex < this.state.timeCapsule.length - 1) {
+            this.state.timeCapsuleIndex++;
+            this.updateTimeCapsuleState();
+        }
+    }
+    
+    /**
+     * Navigate to previous step in time capsule
+     */
+    timeCapsulePrevious(): void {
+        if (!this.state.timeCapsuleActive || this.state.timeCapsule.length === 0) {
+            return;
+        }
+        
+        if (this.state.timeCapsuleIndex > 0) {
+            this.state.timeCapsuleIndex--;
+            this.updateTimeCapsuleState();
+        }
+    }
+    
+    /**
+     * Update state based on current time capsule index
+     */
+    private updateTimeCapsuleState(): void {
+        const step = this.state.timeCapsule[this.state.timeCapsuleIndex];
+        if (step) {
+            this.state.currentNode = step.node === '__start__' ? 'START' : 
+                                     step.node === '__end__' ? 'END' : step.node;
+            this.state.currentState = step.state_after;
+            this.addLogEntry('info', `Time Capsule: Step ${step.step + 1}/${this.state.timeCapsule.length} - ${step.node}`);
+            this._onStateChange.fire(this.state);
+        }
+    }
+    
+    /**
+     * Get current time capsule step
+     */
+    getCurrentTimeCapsuleStep(): TimeCapsuleStep | null {
+        if (this.state.timeCapsuleActive && this.state.timeCapsule.length > 0) {
+            return this.state.timeCapsule[this.state.timeCapsuleIndex];
+        }
+        return null;
+    }
+    
+    /**
+     * Check if we're at the first step
+     */
+    isAtFirstStep(): boolean {
+        return this.state.timeCapsuleIndex === 0;
+    }
+    
+    /**
+     * Check if we're at the last step
+     */
+    isAtLastStep(): boolean {
+        return this.state.timeCapsuleIndex >= this.state.timeCapsule.length - 1;
     }
     
     /**
@@ -353,6 +479,15 @@ export class DebugSession {
             case 'graph_end':
                 this.state.executionState = 'stopped';
                 this.state.finalOutput = data?.output;
+                
+                // Store time capsule data
+                if (data?.timeCapsule && Array.isArray(data.timeCapsule)) {
+                    this.state.timeCapsule = data.timeCapsule;
+                    this.state.timeCapsuleIndex = 0;
+                    this.state.timeCapsuleActive = false;
+                    this.addLogEntry('info', `Time Capsule recorded ${data.timeCapsule.length} steps`);
+                }
+                
                 if (data?.error) {
                     this.addLogEntry('error', `Graph execution failed: ${data.error}`);
                 } else {

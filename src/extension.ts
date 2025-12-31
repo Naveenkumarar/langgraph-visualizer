@@ -254,6 +254,39 @@ export function activate(context: vscode.ExtensionContext) {
     );
     context.subscriptions.push(toggleBreakpointCommand);
 
+    // Time Capsule commands
+    const timeCapsuleActivateCommand = vscode.commands.registerCommand(
+        'langgraph-visualizer.timeCapsuleActivate',
+        () => {
+            debugSession.activateTimeCapsule();
+        }
+    );
+    context.subscriptions.push(timeCapsuleActivateCommand);
+
+    const timeCapsuleDeactivateCommand = vscode.commands.registerCommand(
+        'langgraph-visualizer.timeCapsuleDeactivate',
+        () => {
+            debugSession.deactivateTimeCapsule();
+        }
+    );
+    context.subscriptions.push(timeCapsuleDeactivateCommand);
+
+    const timeCapsuleNextCommand = vscode.commands.registerCommand(
+        'langgraph-visualizer.timeCapsuleNext',
+        () => {
+            debugSession.timeCapsuleNext();
+        }
+    );
+    context.subscriptions.push(timeCapsuleNextCommand);
+
+    const timeCapsulePreviousCommand = vscode.commands.registerCommand(
+        'langgraph-visualizer.timeCapsulePrevious',
+        () => {
+            debugSession.timeCapsulePrevious();
+        }
+    );
+    context.subscriptions.push(timeCapsulePreviousCommand);
+
     // Update status bar when editor changes
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor(updateStatusBar)

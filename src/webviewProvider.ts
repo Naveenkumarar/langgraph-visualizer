@@ -149,6 +149,18 @@ export class WebviewProvider {
                         case 'debugStop':
                             vscode.commands.executeCommand('langgraph-visualizer.stopDebug');
                             break;
+                        case 'timeCapsuleActivate':
+                            vscode.commands.executeCommand('langgraph-visualizer.timeCapsuleActivate');
+                            break;
+                        case 'timeCapsuleDeactivate':
+                            vscode.commands.executeCommand('langgraph-visualizer.timeCapsuleDeactivate');
+                            break;
+                        case 'timeCapsuleNext':
+                            vscode.commands.executeCommand('langgraph-visualizer.timeCapsuleNext');
+                            break;
+                        case 'timeCapsulePrevious':
+                            vscode.commands.executeCommand('langgraph-visualizer.timeCapsulePrevious');
+                            break;
                         case 'debugStart':
                             vscode.commands.executeCommand('langgraph-visualizer.startDebugWithPath', message.pythonPath);
                             break;
@@ -261,7 +273,10 @@ export class WebviewProvider {
                     finalOutput: state.finalOutput,
                     breakpoints: Array.from(state.breakpoints),
                     port: state.port,
-                    pythonPath: state.pythonPath
+                    pythonPath: state.pythonPath,
+                    timeCapsule: state.timeCapsule,
+                    timeCapsuleIndex: state.timeCapsuleIndex,
+                    timeCapsuleActive: state.timeCapsuleActive
                 }
             });
         }
@@ -1068,6 +1083,88 @@ export class WebviewProvider {
             color: #fff;
         }
 
+        .debug-btn.capsule {
+            background-color: #9C27B0;
+            color: #fff;
+        }
+
+        .debug-btn.capsule:hover:not(:disabled) {
+            background-color: #7B1FA2;
+        }
+
+        .debug-btn.capsule.active {
+            background-color: #E91E63;
+            animation: capsulePulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes capsulePulse {
+            0%, 100% { box-shadow: 0 0 5px #E91E63; }
+            50% { box-shadow: 0 0 15px #E91E63; }
+        }
+
+        /* Time Capsule Navigation Bar */
+        .time-capsule-nav {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            padding: 10px 20px;
+            background: linear-gradient(135deg, #9C27B0 0%, #E91E63 100%);
+            border-bottom: 1px solid var(--vscode-panel-border);
+        }
+
+        .time-capsule-nav.visible {
+            display: flex;
+        }
+
+        .capsule-nav-btn {
+            background-color: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            padding: 6px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .capsule-nav-btn:hover:not(:disabled) {
+            background-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .capsule-nav-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .capsule-step-info {
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+            padding: 0 10px;
+        }
+
+        .capsule-node-name {
+            font-weight: 400;
+            opacity: 0.9;
+        }
+
+        .capsule-close-btn {
+            background-color: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-left: 10px;
+        }
+
+        .capsule-close-btn:hover {
+            background-color: rgba(255, 255, 255, 0.3);
+        }
+
         /* Execution Log Panel */
         #executionLog {
             position: absolute;
@@ -1353,10 +1450,22 @@ export class WebviewProvider {
             </div>
             <div class="debug-right">
                 <div class="debug-buttons">
-                    <button class="debug-btn primary" id="debugStartBtn" title="Start Debug Session">▶ Start</button>
-                    <button class="debug-btn danger" id="debugStopBtn" title="Stop" disabled>⏹ Stop</button>
+                    <button class="debug-btn primary" id="debugStartBtn" title="Start Debug Session">▶</button>
+                    <button class="debug-btn danger" id="debugStopBtn" title="Stop" disabled>⏹</button>
+                    <button class="debug-btn capsule" id="timeCapsuleBtn" title="Time Capsule - Replay execution history" disabled>💊</button>
                 </div>
             </div>
+        </div>
+        <!-- Time Capsule Navigation (shown when capsule is active) -->
+        <div id="timeCapsuleNav" class="time-capsule-nav">
+            <button class="capsule-nav-btn" id="capsulePrevBtn" title="Previous Step">◀ Previous</button>
+            <span class="capsule-step-info">
+                <span id="capsuleStepNum">0</span> / <span id="capsuleTotalSteps">0</span>
+                <span class="capsule-node-name">(<span id="capsuleNodeName">-</span>)</span>
+            </span>
+            <button class="capsule-nav-btn" id="capsuleNextBtn" title="Next Step">Next ▶</button>
+            <button class="capsule-close-btn" id="capsuleCloseBtn" title="Close Time Capsule">✕</button>
+        </div>
         </div>
         <!-- Debug Info (shown when active) -->
         <div id="debugInfoRow" class="debug-info-row">
@@ -1367,42 +1476,6 @@ export class WebviewProvider {
     </div>
     
     <div id="cy">
-        <!-- Input/Output Panel -->
-        <div id="ioPanel">
-            <div class="io-header">
-                <h4>📥 Input / Output</h4>
-                <button class="copy-state-btn" id="copyIOBtn" title="Copy">📋</button>
-            </div>
-            <div class="io-tabs">
-                <button class="io-tab active" data-tab="input">Input</button>
-                <button class="io-tab" data-tab="output">Output</button>
-            </div>
-            <div class="io-content">
-                <pre id="ioContent">No data yet</pre>
-            </div>
-        </div>
-
-        <!-- Live State Panel -->
-        <div id="liveStatePanel">
-            <div class="live-state-header">
-                <h4><span class="live-indicator"></span> Live State</h4>
-            </div>
-            <div class="live-state-content">
-                <pre id="liveStateContent">Waiting for execution...</pre>
-            </div>
-        </div>
-
-        <!-- Execution Log -->
-        <div id="executionLog">
-            <div class="log-header">
-                <h4>📜 Execution Log</h4>
-                <button class="copy-state-btn" id="clearLogBtn" title="Clear Log">🗑️</button>
-            </div>
-            <div class="log-content" id="logContent">
-                <div class="log-entry info">Waiting for debug session...</div>
-            </div>
-        </div>
-
         <div id="statePanel" class="${graphData.state && graphData.state.length > 0 ? '' : 'hidden'}">
             <div class="state-header" id="statePanelHeader">
                 <h3>
@@ -1543,10 +1616,11 @@ export class WebviewProvider {
             finalOutput: null,
             breakpoints: [],
             port: 0,
-            pythonPath: 'python'
+            pythonPath: 'python',
+            timeCapsule: [],
+            timeCapsuleIndex: 0,
+            timeCapsuleActive: false
         };
-        let currentIOTab = 'input';
-        
         // Handle messages from extension
         window.addEventListener('message', event => {
             const message = event.data;
@@ -1597,26 +1671,17 @@ export class WebviewProvider {
             const debugStatusText = document.getElementById('debugStatusText');
             const debugPort = document.getElementById('debugPort');
             const debugCurrentNode = document.getElementById('debugCurrentNode');
-            const executionLog = document.getElementById('executionLog');
-            const liveStatePanel = document.getElementById('liveStatePanel');
-            const ioPanel = document.getElementById('ioPanel');
             const pythonPathInput = document.getElementById('pythonPathInput');
             const debugStartBtn = document.getElementById('debugStartBtn');
             
-            // Show/hide debug info row and panels, disable input while running
+            // Show/hide debug info row, disable input while running
             if (debugState.isActive) {
                 debugInfoRow.classList.add('visible');
-                executionLog.classList.add('visible');
-                debugStartBtn.textContent = '▶ Running';
                 debugStartBtn.disabled = true;
                 pythonPathInput.disabled = true;
                 pythonPathInput.title = 'Stop debug session to change Python path';
             } else {
                 debugInfoRow.classList.remove('visible');
-                executionLog.classList.remove('visible');
-                liveStatePanel.classList.remove('visible');
-                ioPanel.classList.remove('visible');
-                debugStartBtn.textContent = '▶ Start';
                 debugStartBtn.disabled = false;
                 pythonPathInput.disabled = false;
                 pythonPathInput.title = 'Enter Python interpreter path';
@@ -1651,19 +1716,44 @@ export class WebviewProvider {
             // Update buttons
             document.getElementById('debugStopBtn').disabled = !debugState.isActive;
             
-            // Update live state panel
-            if (debugState.currentState) {
-                liveStatePanel.classList.add('visible');
-                document.getElementById('liveStateContent').textContent = JSON.stringify(debugState.currentState, null, 2);
+            // Update Time Capsule button
+            const timeCapsuleBtn = document.getElementById('timeCapsuleBtn');
+            const timeCapsuleNav = document.getElementById('timeCapsuleNav');
+            
+            // Enable capsule button when execution completes and we have capsule data
+            const hasCapsuleData = debugState.timeCapsule && debugState.timeCapsule.length > 0;
+            const executionComplete = debugState.executionState === 'stopped' && hasCapsuleData;
+            timeCapsuleBtn.disabled = !executionComplete && !debugState.timeCapsuleActive;
+            
+            if (debugState.timeCapsuleActive) {
+                timeCapsuleBtn.classList.add('active');
+                timeCapsuleNav.classList.add('visible');
                 
-                // Also update the static state panel with live values
-                updateStatePanelWithLiveValues(debugState.currentState);
+                // Update capsule navigation info
+                const stepNum = debugState.timeCapsuleIndex + 1;
+                const totalSteps = debugState.timeCapsule.length;
+                const currentStep = debugState.timeCapsule[debugState.timeCapsuleIndex];
+                
+                document.getElementById('capsuleStepNum').textContent = stepNum;
+                document.getElementById('capsuleTotalSteps').textContent = totalSteps;
+                document.getElementById('capsuleNodeName').textContent = currentStep ? currentStep.node : '-';
+                
+                // Disable prev/next at boundaries
+                document.getElementById('capsulePrevBtn').disabled = debugState.timeCapsuleIndex === 0;
+                document.getElementById('capsuleNextBtn').disabled = debugState.timeCapsuleIndex >= debugState.timeCapsule.length - 1;
+                
+                // Highlight current capsule node
+                if (debugState.currentNode) {
+                    highlightCurrentNode(debugState.currentNode);
+                }
+            } else {
+                timeCapsuleBtn.classList.remove('active');
+                timeCapsuleNav.classList.remove('visible');
             }
             
-            // Update I/O panel
-            if (debugState.initialInput || debugState.finalOutput) {
-                ioPanel.classList.add('visible');
-                updateIOPanel();
+            // Update the static state panel with live values
+            if (debugState.currentState) {
+                updateStatePanelWithLiveValues(debugState.currentState);
             }
         }
         
@@ -1801,38 +1891,9 @@ export class WebviewProvider {
             // Only update existing fields from schema, don't add new ones
         }
         
-        // Add log entry to UI
+        // Log entry handler (no-op since log panel removed)
         function addLogEntryToUI(logEntry) {
-            const logContent = document.getElementById('logContent');
-            const timestamp = new Date(logEntry.timestamp).toLocaleTimeString();
-            
-            const entryDiv = document.createElement('div');
-            entryDiv.className = 'log-entry ' + logEntry.type;
-            entryDiv.innerHTML = '<span class="log-timestamp">' + timestamp + '</span>' + logEntry.message;
-            
-            logContent.appendChild(entryDiv);
-            
-            // Scroll to bottom
-            logContent.scrollTop = logContent.scrollHeight;
-            
-            // Keep log limited to 100 entries
-            while (logContent.children.length > 100) {
-                logContent.removeChild(logContent.firstChild);
-            }
-        }
-        
-        // Update I/O panel
-        function updateIOPanel() {
-            const ioContent = document.getElementById('ioContent');
-            if (currentIOTab === 'input') {
-                ioContent.textContent = debugState.initialInput 
-                    ? JSON.stringify(debugState.initialInput, null, 2)
-                    : 'No input data';
-            } else {
-                ioContent.textContent = debugState.finalOutput 
-                    ? JSON.stringify(debugState.finalOutput, null, 2)
-                    : 'No output yet';
-            }
+            // Log panel removed - no action needed
         }
         
         // Graph data
@@ -2494,6 +2555,27 @@ export class WebviewProvider {
             vscode.postMessage({ command: 'debugStop' });
         });
         
+        // Time Capsule button event listeners
+        document.getElementById('timeCapsuleBtn')?.addEventListener('click', () => {
+            if (debugState.timeCapsuleActive) {
+                vscode.postMessage({ command: 'timeCapsuleDeactivate' });
+            } else {
+                vscode.postMessage({ command: 'timeCapsuleActivate' });
+            }
+        });
+        
+        document.getElementById('capsulePrevBtn')?.addEventListener('click', () => {
+            vscode.postMessage({ command: 'timeCapsulePrevious' });
+        });
+        
+        document.getElementById('capsuleNextBtn')?.addEventListener('click', () => {
+            vscode.postMessage({ command: 'timeCapsuleNext' });
+        });
+        
+        document.getElementById('capsuleCloseBtn')?.addEventListener('click', () => {
+            vscode.postMessage({ command: 'timeCapsuleDeactivate' });
+        });
+        
         // Enter key on python path input starts debug
         document.getElementById('pythonPathInput')?.addEventListener('keypress', (e) => {
             if (e.key === 'Enter' && !debugState.isActive) {
@@ -2502,23 +2584,6 @@ export class WebviewProvider {
             }
         });
         
-        // Clear log button
-        document.getElementById('clearLogBtn')?.addEventListener('click', () => {
-            const logContent = document.getElementById('logContent');
-            if (logContent) {
-                logContent.innerHTML = '<div class="log-entry info">Log cleared</div>';
-            }
-        });
-        
-        // I/O tab switching
-        document.querySelectorAll('.io-tab').forEach(tab => {
-            tab.addEventListener('click', (e) => {
-                document.querySelectorAll('.io-tab').forEach(t => t.classList.remove('active'));
-                e.target.classList.add('active');
-                currentIOTab = e.target.getAttribute('data-tab');
-                updateIOPanel();
-            });
-        });
         
         // Double-click on node to toggle breakpoint
         if (typeof cy !== 'undefined' && cy) {

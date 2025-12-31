@@ -151,7 +151,7 @@ workflow.add_edge("finalize", END)
 app = workflow.compile()
 
 
-# Run the example when executed directly
+# # Run the example when executed directly
 if __name__ == "__main__":
     print("\n" + "="*50)
     print("🤖 Chatbot Workflow Demo")

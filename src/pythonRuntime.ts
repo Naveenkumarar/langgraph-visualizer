@@ -46,6 +46,74 @@ class ExecutionState:
     STOPPED = "stopped"
 
 
+class TimeCapsule:
+    """
+    Stores execution history for replay/navigation after flow completes.
+    """
+    def __init__(self):
+        self.steps: List[Dict] = []
+        self.is_recording = False
+    
+    def start_recording(self, initial_input: Any):
+        """Start recording a new execution"""
+        self.steps = []
+        self.is_recording = True
+        # Record initial state - start node has empty state (before any processing)
+        self.steps.append({
+            "step": 0,
+            "node": "__start__",
+            "type": "input",
+            "input": initial_input,
+            "output": None,
+            "state_before": {},
+            "state_after": {},  # Empty state at start
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    def record_node(self, node_name: str, input_data: Any, output_data: Any, 
+                    state_before: Any, state_after: Any, duration: float = 0):
+        """Record a node execution"""
+        if not self.is_recording:
+            return
+        
+        self.steps.append({
+            "step": len(self.steps),
+            "node": node_name,
+            "type": "node",
+            "input": input_data,
+            "output": output_data,
+            "state_before": state_before,
+            "state_after": state_after,
+            "duration": duration,
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    def stop_recording(self, final_output: Any = None, error: str = None):
+        """Stop recording and finalize"""
+        self.is_recording = False
+        # Record final state
+        self.steps.append({
+            "step": len(self.steps),
+            "node": "__end__",
+            "type": "output",
+            "input": None,
+            "output": final_output,
+            "state_before": self.steps[-1]["state_after"] if self.steps else None,
+            "state_after": final_output,
+            "error": error,
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    def get_history(self) -> List[Dict]:
+        """Get the full execution history"""
+        return self.steps
+    
+    def clear(self):
+        """Clear the history for next run"""
+        self.steps = []
+        self.is_recording = False
+
+
 class VisualizerRuntime:
     """
     Runtime debugging support for LangGraph Visualizer.
@@ -63,6 +131,11 @@ class VisualizerRuntime:
         self.breakpoints: set = set()
         self.current_node: Optional[str] = None
         self.execution_log: List[Dict] = []
+        
+        # Time Capsule for execution history
+        self.time_capsule = TimeCapsule()
+        self._current_state: Dict = {}  # Track current state for capsule
+        self._pending_input = None  # For receiving input from UI
         
         # Threading controls
         self._pause_event = threading.Event()
@@ -146,6 +219,9 @@ class VisualizerRuntime:
             self.step()
         elif command == "stop":
             self.stop()
+        elif command == "input_response":
+            # Store the input for the waiting function
+            self._pending_input = data.get("input")
         elif command == "set_breakpoint":
             self.add_breakpoint(data.get("nodeId"))
         elif command == "remove_breakpoint":
@@ -184,23 +260,35 @@ class VisualizerRuntime:
             return f"<{type(obj).__name__}>"
     
     # Execution control
-    def start_execution(self):
+    def start_execution(self, initial_input: Any = None):
         """Called when graph execution starts"""
         with self._lock:
             self.execution_state = ExecutionState.RUNNING
             self._stop_requested = False
             self._pause_event.set()
             self.execution_log = []
+            self._current_state = initial_input if isinstance(initial_input, dict) else {}
+        
+        # Clear and start recording in time capsule
+        self.time_capsule.clear()
+        self.time_capsule.start_recording(initial_input)
+        
         self._send_message("graph_start", {"status": "started"})
     
     def end_execution(self, output: Any = None, error: str = None):
         """Called when graph execution ends"""
         with self._lock:
             self.execution_state = ExecutionState.STOPPED
+        
+        # Stop recording and send time capsule data
+        self.time_capsule.stop_recording(output, error)
+        capsule_history = self.time_capsule.get_history()
+        
         self._send_message("graph_end", {
             "output": output,
             "error": error,
-            "log": self.execution_log
+            "log": self.execution_log,
+            "timeCapsule": capsule_history
         })
     
     def pause(self):
@@ -280,12 +368,16 @@ class VisualizerRuntime:
     def on_node_start(self, node_name: str, input_data: Any, state: Any):
         """Called when a node starts executing"""
         self.current_node = node_name
+        
+        # Store state before this node
+        state_before = dict(self._current_state) if self._current_state else {}
+        
         log_entry = {
             "node": node_name,
             "type": "start",
             "timestamp": datetime.now().isoformat(),
             "input": input_data,
-            "state_before": state
+            "state_before": state_before
         }
         self.execution_log.append(log_entry)
         
@@ -293,26 +385,49 @@ class VisualizerRuntime:
             "nodeId": node_name,
             "nodeName": node_name,
             "input": input_data,
-            "stateBefore": state
+            "stateBefore": state_before
         })
     
     def on_node_end(self, node_name: str, output_data: Any, state: Any, duration: float = 0):
         """Called when a node finishes executing"""
+        # Get state before from log
+        state_before = None
+        for entry in reversed(self.execution_log):
+            if entry.get("node") == node_name and entry.get("type") == "start":
+                state_before = entry.get("state_before")
+                break
+        
+        # Update current state with output
+        state_after = state
+        if isinstance(state, dict):
+            self._current_state.update(state)
+            state_after = dict(self._current_state)
+        
         log_entry = {
             "node": node_name,
             "type": "end",
             "timestamp": datetime.now().isoformat(),
             "output": output_data,
-            "state_after": state,
+            "state_after": state_after,
             "duration": duration
         }
         self.execution_log.append(log_entry)
+        
+        # Record to time capsule
+        self.time_capsule.record_node(
+            node_name, 
+            output_data,  # input to this step
+            output_data,  # output from this step
+            state_before, 
+            state_after, 
+            duration
+        )
         
         self._send_message("node_end", {
             "nodeId": node_name,
             "nodeName": node_name,
             "output": output_data,
-            "stateAfter": state,
+            "stateAfter": state_after,
             "duration": duration
         })
     
@@ -407,7 +522,7 @@ def wrap_graph_for_debugging(graph, runtime: VisualizerRuntime):
     original_stream = getattr(graph, 'stream', None)
     
     def wrapped_invoke(input_data, config=None, **kwargs):
-        runtime.start_execution()
+        runtime.start_execution(input_data)
         
         if config is None:
             config = {}
@@ -415,7 +530,6 @@ def wrap_graph_for_debugging(graph, runtime: VisualizerRuntime):
         try:
             # Send initial input
             runtime._send_message("input", {"data": input_data})
-            print(f"[DEBUG] Starting graph execution with input: {type(input_data)}")
             
             # Use stream to track each node
             if original_stream:
@@ -425,18 +539,15 @@ def wrap_graph_for_debugging(graph, runtime: VisualizerRuntime):
                 
                 # Stream returns chunks after each node completes
                 for chunk in original_stream(input_data, config, **kwargs):
-                    print(f"[DEBUG] Got stream chunk: {list(chunk.keys()) if isinstance(chunk, dict) else type(chunk)}")
-                    
                     if isinstance(chunk, dict):
                         for node_name, node_output in chunk.items():
                             # End previous node if there was one
                             if current_node:
                                 duration = time.time() - node_start_time if node_start_time else 0
-                                runtime.on_node_end(current_node, result, node_output, duration)
-                                print(f"[DEBUG] Node ended: {current_node}")
+                                # Use result (previous node output) for state, not next node output
+                                runtime.on_node_end(current_node, result, result, duration)
                             
                             # Start this node (it's actually just completed, but we show it as "active")
-                            print(f"[DEBUG] Node active: {node_name}")
                             runtime.on_node_start(node_name, node_output, node_output)
                             
                             # Keep it highlighted for a moment
@@ -451,16 +562,13 @@ def wrap_graph_for_debugging(graph, runtime: VisualizerRuntime):
                 # End the last node
                 if current_node:
                     runtime.on_node_end(current_node, result, result, 0)
-                    print(f"[DEBUG] Last node ended: {current_node}")
                 
                 # Send final output
                 runtime._send_message("output", {"data": result})
                 runtime.end_execution(output=result)
-                print(f"[DEBUG] Graph execution completed")
                 return result
             else:
                 # Fallback to regular invoke
-                print(f"[DEBUG] No stream available, using invoke")
                 result = original_invoke(input_data, config, **kwargs)
                 runtime._send_message("output", {"data": result})
                 runtime.end_execution(output=result)
@@ -470,7 +578,6 @@ def wrap_graph_for_debugging(graph, runtime: VisualizerRuntime):
             runtime.end_execution(error="Stopped by user")
             raise
         except Exception as e:
-            print(f"[DEBUG] Error: {e}")
             runtime.on_error(str(e))
             runtime.end_execution(error=str(e))
             raise
@@ -720,17 +827,90 @@ if _has_main_block:
             
             exec(body_code, exec_globals)
         else:
-            print("Could not find main block body, running interactively")
+            print("Could not find main block body")
+        # Request input from VS Code UI
+        request_input_from_ui()
     except Exception as e:
         import traceback
         print(f"Error executing main block: {e}")
         traceback.print_exc()
-        print("Running in interactive mode instead")
+        print("Requesting input from UI...")
+        request_input_from_ui()
 else:
-    print("\\nYou can now invoke the graph with:")
-    print("  result = wrapped_graph.invoke(your_input)")
-    print("\\nOr start an interactive session.")
-    print("="*50 + "\\n")
+    print("\\nNo main block found - requesting input from UI...")
+    request_input_from_ui()
+
+def request_input_from_ui():
+    """Request input state from VS Code UI and run the graph"""
+    import json
+    
+    # Get state fields from the graph if possible
+    state_fields = []
+    try:
+        # Try to get state schema from the graph
+        if hasattr(wrapped_graph, 'get_graph'):
+            graph_def = wrapped_graph.get_graph()
+            if hasattr(graph_def, 'schema') and graph_def.schema:
+                for field_name, field_info in graph_def.schema.__annotations__.items():
+                    field_type = str(field_info).replace("typing.", "")
+                    state_fields.append({"name": field_name, "type": field_type})
+    except:
+        pass
+    
+    # If no fields found, try to get from user module's State class
+    if not state_fields:
+        for name in dir(user_module):
+            obj = getattr(user_module, name)
+            if hasattr(obj, '__annotations__') and name in ['State', 'ChatState', 'AgentState', 'GraphState']:
+                for field_name, field_type in obj.__annotations__.items():
+                    state_fields.append({"name": field_name, "type": str(field_type)})
+                break
+    
+    # Send request to VS Code
+    runtime._send_message("request_input", {
+        "stateFields": state_fields,
+        "message": "Please provide initial state values to run the graph"
+    })
+    
+    print("Waiting for input from VS Code UI...")
+    print("Please fill in the state values in the dialog and click Run.")
+    
+    # Wait for input response
+    def wait_for_input():
+        import time
+        timeout = 300  # 5 minute timeout
+        start = time.time()
+        
+        while time.time() - start < timeout:
+            # Check if we received input (stored by message handler)
+            if hasattr(runtime, '_pending_input') and runtime._pending_input is not None:
+                input_data = runtime._pending_input
+                runtime._pending_input = None
+                return input_data
+            time.sleep(0.5)
+        
+        print("Timeout waiting for input")
+        return None
+    
+    input_data = wait_for_input()
+    
+    if input_data:
+        print(f"\\nReceived input: {input_data}")
+        print("="*50)
+        print("Running graph...")
+        print("="*50 + "\\n")
+        
+        try:
+            result = wrapped_graph.invoke(input_data)
+            print(f"\\n" + "="*50)
+            print("Graph execution completed!")
+            print(f"Result: {json.dumps(result, indent=2, default=str)}")
+            print("="*50 + "\\n")
+        except Exception as e:
+            print(f"Error running graph: {e}")
+    else:
+        print("No input received. You can still run manually:")
+        print("  result = wrapped_graph.invoke(your_input)")
 
 # Restore original compile if patched
 if _original_compile:
