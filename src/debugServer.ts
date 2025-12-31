@@ -30,9 +30,9 @@ try {
  * Message types for communication between Python and VS Code
  */
 export interface DebugMessage {
-    type: 'node_start' | 'node_end' | 'state_update' | 'input' | 'output' | 
-          'error' | 'graph_start' | 'graph_end' | 'paused' | 'resumed' | 
-          'step' | 'stopped' | 'connected' | 'breakpoint_hit';
+    type: 'node_start' | 'node_end' | 'state_update' | 'input' | 'output' |
+    'error' | 'graph_start' | 'graph_end' | 'paused' | 'resumed' |
+    'step' | 'stopped' | 'connected' | 'breakpoint_hit' | 'request_input';
     timestamp: number;
     data: any;
 }
@@ -65,14 +65,14 @@ export class DebugServer {
     private client: any = null;
     private port: number = 0;
     private isRunning: boolean = false;
-    
+
     // Event callbacks
     private onMessageCallback?: (message: DebugMessage) => void;
     private onConnectedCallback?: () => void;
     private onDisconnectedCallback?: () => void;
-    
-    constructor() {}
-    
+
+    constructor() { }
+
     /**
      * Start the WebSocket server
      */
@@ -80,20 +80,20 @@ export class DebugServer {
         if (this.isRunning) {
             return this.port;
         }
-        
+
         return new Promise((resolve, reject) => {
             if (!WebSocketServer) {
                 reject(new Error('WebSocket module not available. Please install ws: npm install ws'));
                 return;
             }
-            
+
             this.server = http.createServer();
             this.wss = new WebSocketServer({ server: this.server });
-            
+
             this.wss.on('connection', (ws: any) => {
                 console.log('LangGraph Debug: Python runtime connected');
                 this.client = ws;
-                
+
                 ws.on('message', (data: any) => {
                     try {
                         const message: DebugMessage = JSON.parse(data.toString());
@@ -102,7 +102,7 @@ export class DebugServer {
                         console.error('LangGraph Debug: Failed to parse message:', error);
                     }
                 });
-                
+
                 ws.on('close', () => {
                     console.log('LangGraph Debug: Python runtime disconnected');
                     this.client = null;
@@ -110,16 +110,16 @@ export class DebugServer {
                         this.onDisconnectedCallback();
                     }
                 });
-                
+
                 ws.on('error', (error: Error) => {
                     console.error('LangGraph Debug: WebSocket error:', error);
                 });
-                
+
                 if (this.onConnectedCallback) {
                     this.onConnectedCallback();
                 }
             });
-            
+
             // Try to find an available port
             const tryPort = (port: number) => {
                 this.server!.listen(port, '127.0.0.1', () => {
@@ -128,7 +128,7 @@ export class DebugServer {
                     console.log(`LangGraph Debug: Server started on port ${port}`);
                     resolve(port);
                 });
-                
+
                 this.server!.on('error', (err: NodeJS.ErrnoException) => {
                     if (err.code === 'EADDRINUSE') {
                         // Port in use, try next
@@ -138,11 +138,11 @@ export class DebugServer {
                     }
                 });
             };
-            
+
             tryPort(preferredPort);
         });
     }
-    
+
     /**
      * Stop the WebSocket server
      */
@@ -152,12 +152,12 @@ export class DebugServer {
                 this.client.close();
                 this.client = null;
             }
-            
+
             if (this.wss) {
                 this.wss.close();
                 this.wss = null;
             }
-            
+
             if (this.server) {
                 this.server.close(() => {
                     this.server = null;
@@ -170,28 +170,28 @@ export class DebugServer {
             }
         });
     }
-    
+
     /**
      * Check if server is running
      */
     get running(): boolean {
         return this.isRunning;
     }
-    
+
     /**
      * Check if a client is connected
      */
     get connected(): boolean {
         return this.client !== null && this.client.readyState === 1; // WebSocket.OPEN = 1
     }
-    
+
     /**
      * Get the server port
      */
     getPort(): number {
         return this.port;
     }
-    
+
     /**
      * Send a command to the Python runtime
      */
@@ -200,84 +200,84 @@ export class DebugServer {
             console.warn('LangGraph Debug: No client connected');
             return false;
         }
-        
+
         const message = JSON.stringify({
             command,
             data,
             timestamp: Date.now()
         });
-        
+
         this.client!.send(message);
         return true;
     }
-    
+
     /**
      * Send pause command
      */
     pause(): boolean {
         return this.send('pause');
     }
-    
+
     /**
      * Send resume command
      */
     resume(): boolean {
         return this.send('resume');
     }
-    
+
     /**
      * Send step command
      */
     step(): boolean {
         return this.send('step');
     }
-    
+
     /**
      * Send stop command
      */
     stopExecution(): boolean {
         return this.send('stop');
     }
-    
+
     /**
      * Set breakpoint
      */
     setBreakpoint(nodeId: string): boolean {
         return this.send('set_breakpoint', { nodeId });
     }
-    
+
     /**
      * Remove breakpoint
      */
     removeBreakpoint(nodeId: string): boolean {
         return this.send('remove_breakpoint', { nodeId });
     }
-    
+
     /**
      * Handle incoming message from Python
      */
     private handleMessage(message: DebugMessage): void {
         console.log('LangGraph Debug: Received message:', message.type);
-        
+
         if (this.onMessageCallback) {
             this.onMessageCallback(message);
         }
     }
-    
+
     /**
      * Set message handler
      */
     onMessage(callback: (message: DebugMessage) => void): void {
         this.onMessageCallback = callback;
     }
-    
+
     /**
      * Set connected handler
      */
     onConnected(callback: () => void): void {
         this.onConnectedCallback = callback;
     }
-    
+
     /**
      * Set disconnected handler
      */

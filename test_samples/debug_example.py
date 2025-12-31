@@ -152,33 +152,33 @@ app = workflow.compile()
 
 
 # # Run the example when executed directly
-if __name__ == "__main__":
-    print("\n" + "="*50)
-    print("🤖 Chatbot Workflow Demo")
-    print("="*50)
-    print("Each node has a 5 second delay to see highlighting")
-    print("="*50 + "\n")
+# if __name__ == "__main__":
+#     print("\n" + "="*50)
+#     print("🤖 Chatbot Workflow Demo")
+#     print("="*50)
+#     print("Each node has a 5 second delay to see highlighting")
+#     print("="*50 + "\n")
     
-    # Test with one input to demonstrate node highlighting
-    user_input = "I'm having a great day today!"
+#     # Test with one input to demonstrate node highlighting
+#     user_input = "I'm having a great day today!"
     
-    print(f"Test: \"{user_input}\"")
-    print('─'*40)
+#     print(f"Test: \"{user_input}\"")
+#     print('─'*40)
     
-    initial_state = {
-        "user_input": user_input,
-        "response": "",
-        "sentiment": "",
-        "step_count": 0
-    }
+#     initial_state = {
+#         "user_input": user_input,
+#         "response": "",
+#         "sentiment": "",
+#         "step_count": 0
+#     }
     
-    result = app.invoke(initial_state)
+#     result = app.invoke(initial_state)
     
-    print(f"\n📤 Response: {result['response']}")
-    print(f"📊 Final sentiment: {result['sentiment']}")
-    print(f"📈 Steps taken: {result['step_count']}")
+#     print(f"\n📤 Response: {result['response']}")
+#     print(f"📊 Final sentiment: {result['sentiment']}")
+#     print(f"📈 Steps taken: {result['step_count']}")
     
-    print("\n" + "="*50)
-    print("✨ Demo complete!")
-    print("="*50 + "\n")
+#     print("\n" + "="*50)
+#     print("✨ Demo complete!")
+#     print("="*50 + "\n")
 

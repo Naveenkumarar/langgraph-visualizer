@@ -144,7 +144,7 @@ export class WebviewProvider {
                                 });
                             }
                             break;
-                        
+
                         // Debug commands from webview
                         case 'debugStop':
                             vscode.commands.executeCommand('langgraph-visualizer.stopDebug');
@@ -304,6 +304,33 @@ export class WebviewProvider {
                 logEntry: logEntry
             });
         }
+    }
+
+    /**
+     * Show input form in the visualization panel and wait for user input
+     */
+    public static showInputForm(stateFields: Array<{ name: string; type: string }>): Promise<any> {
+        return new Promise((resolve, reject) => {
+            if (!WebviewProvider.currentPanel) {
+                reject(new Error('Visualization panel not open'));
+                return;
+            }
+
+            const disposable = WebviewProvider.currentPanel.webview.onDidReceiveMessage((message: any) => {
+                if (message.command === 'inputFormSubmit') {
+                    disposable.dispose();
+                    resolve(message.data);
+                } else if (message.command === 'inputFormCancel') {
+                    disposable.dispose();
+                    reject(new Error('Input form cancelled'));
+                }
+            });
+
+            WebviewProvider.currentPanel.webview.postMessage({
+                command: 'showInputForm',
+                stateFields: stateFields
+            });
+        });
     }
 
     /**
@@ -1399,6 +1426,265 @@ export class WebviewProvider {
             word-break: break-all;
             font-size: 11px;
         }
+        
+        /* Input Form Styles */
+        .input-form-panel {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            transition: opacity 0.2s;
+        }
+
+        .input-form-panel.hidden {
+            display: none;
+            opacity: 0;
+        }
+
+        .input-form-container {
+            background: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 8px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            color: var(--vscode-foreground);
+        }
+
+        .input-form-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            flex-shrink: 0;
+        }
+
+        .input-form-header h2 {
+            font-size: 18px;
+            margin: 0;
+            font-weight: 600;
+        }
+
+        .input-form-close {
+            background: transparent;
+            border: none;
+            color: var(--vscode-foreground);
+            cursor: pointer;
+            font-size: 20px;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+
+        .input-form-close:hover {
+            background: var(--vscode-button-hoverBackground);
+        }
+
+        .input-form-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .input-form-tabs {
+            display: flex;
+            gap: 8px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            padding-bottom: 8px;
+        }
+
+        .input-form-tab {
+            background: transparent;
+            border: none;
+            color: var(--vscode-descriptionForeground);
+            cursor: pointer;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .input-form-tab.active {
+            color: var(--vscode-foreground);
+            background: var(--vscode-button-background);
+        }
+
+        .input-form-tab-content {
+            display: none;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .input-form-tab-content.active {
+            display: flex;
+        }
+
+        #inputFieldsContainer {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .input-field-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .input-field-label {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--vscode-foreground);
+        }
+
+        .input-field-type {
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            margin-left: 4px;
+        }
+
+        .input-field-input {
+            background: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            border: 1px solid var(--vscode-input-border);
+            padding: 8px 10px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            transition: border-color 0.2s;
+        }
+
+        .input-field-input:focus {
+            outline: none;
+            border-color: var(--vscode-focusBorder);
+            box-shadow: 0 0 0 2px var(--vscode-focusBorder, rgba(0, 0, 0, 0.1));
+        }
+
+        .input-form-help {
+            font-size: 12px;
+            color: var(--vscode-descriptionForeground);
+            padding: 8px;
+            background: var(--vscode-editor-inlineValuesForeground);
+            border-radius: 4px;
+            border-left: 3px solid var(--vscode-focusBorder);
+        }
+
+        .json-upload-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .json-upload-label {
+            padding: 20px;
+            border: 2px dashed var(--vscode-panel-border);
+            border-radius: 6px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: var(--vscode-descriptionForeground);
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .json-upload-label:hover {
+            border-color: var(--vscode-focusBorder);
+            color: var(--vscode-foreground);
+            background: var(--vscode-editor-background);
+        }
+
+        #jsonTextArea {
+            background: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            border: 1px solid var(--vscode-input-border);
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            resize: vertical;
+            transition: border-color 0.2s;
+        }
+
+        #jsonTextArea:focus {
+            outline: none;
+            border-color: var(--vscode-focusBorder);
+        }
+
+        .input-form-error {
+            display: none;
+            background: var(--vscode-errorBackground);
+            color: var(--vscode-errorForeground);
+            padding: 10px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            border: 1px solid var(--vscode-errorBorder);
+        }
+
+        .input-form-error.hidden {
+            display: none;
+        }
+
+        .input-form-error:not(.hidden) {
+            display: block;
+        }
+
+        .input-form-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding: 16px;
+            border-top: 1px solid var(--vscode-panel-border);
+            flex-shrink: 0;
+        }
+
+        .input-form-btn-primary,
+        .input-form-btn-secondary {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .input-form-btn-primary {
+            background: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+        }
+
+        .input-form-btn-primary:hover {
+            background: var(--vscode-button-hoverBackground);
+        }
+
+        .input-form-btn-secondary {
+            background: var(--vscode-button-secondaryBackground);
+            color: var(--vscode-button-secondaryForeground);
+        }
+
+        .input-form-btn-secondary:hover {
+            background: var(--vscode-button-secondaryHoverBackground);
+        }
+
     </style>
 </head>
 <body>
@@ -1476,6 +1762,52 @@ export class WebviewProvider {
     </div>
     
     <div id="cy">
+        <!-- Input Form Panel -->
+        <div id="inputFormPanel" class="input-form-panel hidden">
+            <div class="input-form-container">
+                <div class="input-form-header">
+                    <h2>🚀 Graph Input State</h2>
+                    <button class="input-form-close" id="closeInputForm" title="Close input form">✕</button>
+                </div>
+                
+                <div class="input-form-content">
+                    <div class="input-form-tabs">
+                        <button class="input-form-tab active" data-tab="manual">Manual Input</button>
+                        <button class="input-form-tab" data-tab="json">Upload JSON</button>
+                    </div>
+
+                    <!-- Manual Input Tab -->
+                    <div id="manualInputTab" class="input-form-tab-content active">
+                        <form id="manualInputForm">
+                            <div id="inputFieldsContainer"></div>
+                            <div class="input-form-help">
+                                Supports JSON: numbers (42), strings ("hello"), objects ({"key":"value"}), arrays ([1,2,3])
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- JSON Upload Tab -->
+                    <div id="jsonInputTab" class="input-form-tab-content">
+                        <div class="json-upload-container">
+                            <label for="jsonFileInput" class="json-upload-label">
+                                <span>📁 Click to upload JSON file or drag & drop</span>
+                                <input type="file" id="jsonFileInput" accept=".json" style="display: none;">
+                            </label>
+                            <textarea id="jsonTextArea" placeholder="Or paste JSON here..." rows="10"></textarea>
+                            <button type="button" id="parseJsonBtn" class="input-form-btn-secondary">Parse & Load</button>
+                        </div>
+                    </div>
+
+                    <div id="inputFormError" class="input-form-error hidden"></div>
+                </div>
+
+                <div class="input-form-footer">
+                    <button type="button" id="cancelInputForm" class="input-form-btn-secondary">Cancel</button>
+                    <button type="button" id="submitInputForm" class="input-form-btn-primary">Run Graph</button>
+                </div>
+            </div>
+        </div>
+        
         <div id="statePanel" class="${graphData.state && graphData.state.length > 0 ? '' : 'hidden'}">
             <div class="state-header" id="statePanelHeader">
                 <h3>
@@ -1622,6 +1954,189 @@ export class WebviewProvider {
             timeCapsuleActive: false
         };
         // Handle messages from extension
+        
+        // Input Form Handler
+        (() => {
+            const inputFormPanel = document.getElementById('inputFormPanel');
+            const closeInputFormBtn = document.getElementById('closeInputForm');
+            const cancelInputFormBtn = document.getElementById('cancelInputForm');
+            const submitInputFormBtn = document.getElementById('submitInputForm');
+            const manualInputForm = document.getElementById('manualInputForm');
+            const jsonFileInput = document.getElementById('jsonFileInput');
+            const jsonTextArea = document.getElementById('jsonTextArea');
+            const parseJsonBtn = document.getElementById('parseJsonBtn');
+            const inputFormError = document.getElementById('inputFormError');
+            const inputFieldsContainer = document.getElementById('inputFieldsContainer');
+            const manualInputTab = document.getElementById('manualInputTab');
+            const jsonInputTab = document.getElementById('jsonInputTab');
+            const formTabs = document.querySelectorAll('.input-form-tab');
+
+            let currentStateFields = [];
+
+            // Tab switching
+            formTabs.forEach(tab => {
+                tab.addEventListener('click', (e) => {
+                    const tabName = e.target.dataset.tab;
+                    formTabs.forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.input-form-tab-content').forEach(c => c.classList.remove('active'));
+                    e.target.classList.add('active');
+                    if (tabName === 'manual') {
+                        manualInputTab.classList.add('active');
+                    } else {
+                        jsonInputTab.classList.add('active');
+                    }
+                });
+            });
+
+            // JSON file upload
+            jsonFileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        jsonTextArea.value = event.target.result;
+                    };
+                    reader.readAsText(file);
+                }
+            });
+
+            // Parse JSON
+            parseJsonBtn.addEventListener('click', () => {
+                try {
+                    const json = JSON.parse(jsonTextArea.value);
+                    submitInputFormWithData(json);
+                } catch (err) {
+                    showInputFormError('Invalid JSON: ' + err.message);
+                }
+            });
+
+            // Close buttons
+            closeInputFormBtn.addEventListener('click', cancelInputForm);
+            cancelInputFormBtn.addEventListener('click', cancelInputForm);
+
+            // Submit button
+            submitInputFormBtn.addEventListener('click', () => {
+                const activeTab = document.querySelector('.input-form-tab.active').dataset.tab;
+                if (activeTab === 'manual') {
+                    submitManualForm();
+                } else {
+                    parseJsonBtn.click();
+                }
+            });
+
+            function showInputForm(stateFields) {
+                currentStateFields = stateFields || [];
+                inputFieldsContainer.innerHTML = '';
+
+                if (stateFields && stateFields.length > 0) {
+                    stateFields.forEach(field => {
+                        const fieldDiv = document.createElement('div');
+                        fieldDiv.className = 'input-field-group';
+                        fieldDiv.innerHTML = \`
+                            <label class="input-field-label">
+                                \${field.name}
+                                <span class="input-field-type">(\${field.type})</span>
+                            </label>
+                            <input 
+                                type="text" 
+                                class="input-field-input" 
+                                name="\${field.name}"
+                                placeholder="Enter value (JSON format)"
+                            />
+                        \`;
+                        inputFieldsContainer.appendChild(fieldDiv);
+                    });
+                } else {
+                    inputFieldsContainer.innerHTML = '<p style="color: var(--vscode-descriptionForeground); font-size: 13px;">No state fields detected. Provide input as JSON.</p>';
+                }
+
+                inputFormPanel.classList.remove('hidden');
+                const firstInput = inputFieldsContainer.querySelector('.input-field-input');
+                if (firstInput) {
+                    firstInput.focus();
+                }
+            }
+
+            function submitManualForm() {
+                hideInputFormError();
+                try {
+                    const inputData = {};
+                    const inputs = manualInputForm.querySelectorAll('.input-field-input');
+                    
+                    inputs.forEach(input => {
+                        const value = input.value.trim();
+                        const fieldName = input.name;
+                        
+                        if (value === '') {
+                            // Find the field info to determine the type
+                            const fieldInfo = currentStateFields.find(f => f.name === fieldName);
+                            
+                            // Provide sensible defaults based on field type
+                            if (fieldInfo) {
+                                const fieldType = fieldInfo.type.toLowerCase();
+                                if (fieldType.includes('int')) {
+                                    inputData[fieldName] = 0;
+                                } else if (fieldType.includes('float') || fieldType.includes('double')) {
+                                    inputData[fieldName] = 0.0;
+                                } else if (fieldType.includes('bool')) {
+                                    inputData[fieldName] = false;
+                                } else if (fieldType.includes('list') || fieldType.includes('dict')) {
+                                    inputData[fieldName] = fieldType.includes('dict') ? {} : [];
+                                } else {
+                                    inputData[fieldName] = '';
+                                }
+                            } else {
+                                inputData[fieldName] = '';
+                            }
+                        } else {
+                            try {
+                                inputData[fieldName] = JSON.parse(value);
+                            } catch {
+                                inputData[fieldName] = value;
+                            }
+                        }
+                    });
+
+                    submitInputFormWithData(inputData);
+                } catch (err) {
+                    showInputFormError('Error processing input: ' + err.message);
+                }
+            }
+
+            function submitInputFormWithData(data) {
+                vscode.postMessage({
+                    command: 'inputFormSubmit',
+                    data: data
+                });
+                cancelInputForm();
+            }
+
+            function cancelInputForm() {
+                inputFormPanel.classList.add('hidden');
+                hideInputFormError();
+                vscode.postMessage({
+                    command: 'inputFormCancel'
+                });
+            }
+
+            function showInputFormError(message) {
+                inputFormError.textContent = message;
+                inputFormError.classList.remove('hidden');
+            }
+
+            function hideInputFormError() {
+                inputFormError.classList.add('hidden');
+            }
+
+            // Listen for showInputForm message from extension
+            window.addEventListener('message', (event) => {
+                const message = event.data;
+                if (message.command === 'showInputForm') {
+                    showInputForm(message.stateFields);
+                }
+            });
+        })();
+
         window.addEventListener('message', event => {
             const message = event.data;
             switch (message.command) {

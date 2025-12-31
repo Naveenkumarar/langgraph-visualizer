@@ -682,8 +682,9 @@ export function getPythonRuntimeCode(port: number = 9876): string {
  * Generate a wrapper script that runs the user's code with debugging
  */
 export function generateDebugWrapperScript(
-    userScriptPath: string, 
+    userScriptPath: string,
     port: number,
+    runtimeFilePath: string,
     graphVariableName: string = 'compiled_graph'
 ): string {
     return `
@@ -702,9 +703,14 @@ os.environ["LANGCHAIN_CALLBACKS_BACKGROUND"] = "false"
 # Add the directory containing the user's script to the path
 sys.path.insert(0, os.path.dirname(r"${userScriptPath}"))
 
-# Import the runtime
-${PYTHON_RUNTIME_CODE}
+import importlib.util as _importlib_util
+_spec_rt = _importlib_util.spec_from_file_location("langgraph_visualizer_runtime", r"${runtimeFilePath}")
+_runtime_mod = _importlib_util.module_from_spec(_spec_rt)
+_spec_rt.loader.exec_module(_runtime_mod)
 
+# Expose runtime helpers locally
+VisualizerRuntime = _runtime_mod.VisualizerRuntime
+wrap_graph_for_debugging = _runtime_mod.wrap_graph_for_debugging
 # Import the user's module (but don't execute __main__ yet)
 import importlib.util
 spec = importlib.util.spec_from_file_location("user_module", r"${userScriptPath}")
@@ -754,8 +760,8 @@ for name in ['compiled_graph', 'graph', 'app', 'workflow', 'compiled']:
 print("\\n" + "="*50)
 print("LangGraph Visualizer Debug Mode Active")
 print("="*50)
-print(f"Connected to VS Code on port {runtime.port}")
-print(f"Graph: {type(graph).__name__}")
+print("Connected to VS Code on port {}".format(runtime.port))
+print("Graph: {}".format(type(graph).__name__))
 
 # Patch StateGraph.compile to wrap resulting graphs
 _original_compile = None
@@ -770,7 +776,80 @@ try:
     StateGraph.compile = _patched_compile
     print("Graph compilation patched for debugging")
 except Exception as e:
-    print(f"Warning: Could not patch StateGraph.compile: {e}")
+    print("Warning: Could not patch StateGraph.compile: {}".format(e))
+
+# Request-input helper must be available before executing user's main block
+def request_input_from_ui():
+    """Request input state from VS Code UI and run the graph"""
+    import json
+    
+    # Get state fields from the graph if possible
+    state_fields = []
+    try:
+        # Try to get state schema from the graph
+        if hasattr(wrapped_graph, 'get_graph'):
+            graph_def = wrapped_graph.get_graph()
+            if hasattr(graph_def, 'schema') and graph_def.schema:
+                for field_name, field_info in graph_def.schema.__annotations__.items():
+                    field_type = str(field_info).replace("typing.", "")
+                    state_fields.append({"name": field_name, "type": field_type})
+    except:
+        pass
+    
+    # If no fields found, try to get from user module's State class
+    if not state_fields:
+        for name in dir(user_module):
+            obj = getattr(user_module, name)
+            if hasattr(obj, '__annotations__') and name in ['State', 'ChatState', 'AgentState', 'GraphState']:
+                for field_name, field_type in obj.__annotations__.items():
+                    state_fields.append({"name": field_name, "type": str(field_type)})
+                break
+    
+    # Send request to VS Code
+    runtime._send_message("request_input", {
+        "stateFields": state_fields,
+        "message": "Please provide initial state values to run the graph"
+    })
+    
+    print("Waiting for input from VS Code UI...")
+    print("Please fill in the state values in the dialog and click Run.")
+    
+    # Wait for input response
+    def wait_for_input():
+        import time
+        timeout = 300  # 5 minute timeout
+        start = time.time()
+        
+        while time.time() - start < timeout:
+            # Check if we received input (stored by message handler)
+            if hasattr(runtime, '_pending_input') and runtime._pending_input is not None:
+                input_data = runtime._pending_input
+                runtime._pending_input = None
+                return input_data
+            time.sleep(0.5)
+        
+        print("Timeout waiting for input")
+        return None
+    
+    input_data = wait_for_input()
+    
+    if input_data:
+        print("\\nReceived input: {}".format(input_data))
+        print("="*50)
+        print("Running graph...")
+        print("="*50 + "\\n")
+        
+        try:
+            result = wrapped_graph.invoke(input_data)
+            print("\\n" + "="*50)
+            print("Graph execution completed!")
+            print("Result: {}".format(json.dumps(result, indent=2, default=str)))
+            print("="*50 + "\\n")
+        except Exception as e:
+            print("Error running graph: {}".format(e))
+    else:
+        print("No input received. You can still run manually:")
+        print("  result = wrapped_graph.invoke(your_input)")
 
 # If the user script has a __main__ block, execute it
 if _has_main_block:
@@ -832,7 +911,7 @@ if _has_main_block:
         request_input_from_ui()
     except Exception as e:
         import traceback
-        print(f"Error executing main block: {e}")
+        print("Error executing main block: {}".format(e))
         traceback.print_exc()
         print("Requesting input from UI...")
         request_input_from_ui()
@@ -840,77 +919,6 @@ else:
     print("\\nNo main block found - requesting input from UI...")
     request_input_from_ui()
 
-def request_input_from_ui():
-    """Request input state from VS Code UI and run the graph"""
-    import json
-    
-    # Get state fields from the graph if possible
-    state_fields = []
-    try:
-        # Try to get state schema from the graph
-        if hasattr(wrapped_graph, 'get_graph'):
-            graph_def = wrapped_graph.get_graph()
-            if hasattr(graph_def, 'schema') and graph_def.schema:
-                for field_name, field_info in graph_def.schema.__annotations__.items():
-                    field_type = str(field_info).replace("typing.", "")
-                    state_fields.append({"name": field_name, "type": field_type})
-    except:
-        pass
-    
-    # If no fields found, try to get from user module's State class
-    if not state_fields:
-        for name in dir(user_module):
-            obj = getattr(user_module, name)
-            if hasattr(obj, '__annotations__') and name in ['State', 'ChatState', 'AgentState', 'GraphState']:
-                for field_name, field_type in obj.__annotations__.items():
-                    state_fields.append({"name": field_name, "type": str(field_type)})
-                break
-    
-    # Send request to VS Code
-    runtime._send_message("request_input", {
-        "stateFields": state_fields,
-        "message": "Please provide initial state values to run the graph"
-    })
-    
-    print("Waiting for input from VS Code UI...")
-    print("Please fill in the state values in the dialog and click Run.")
-    
-    # Wait for input response
-    def wait_for_input():
-        import time
-        timeout = 300  # 5 minute timeout
-        start = time.time()
-        
-        while time.time() - start < timeout:
-            # Check if we received input (stored by message handler)
-            if hasattr(runtime, '_pending_input') and runtime._pending_input is not None:
-                input_data = runtime._pending_input
-                runtime._pending_input = None
-                return input_data
-            time.sleep(0.5)
-        
-        print("Timeout waiting for input")
-        return None
-    
-    input_data = wait_for_input()
-    
-    if input_data:
-        print(f"\\nReceived input: {input_data}")
-        print("="*50)
-        print("Running graph...")
-        print("="*50 + "\\n")
-        
-        try:
-            result = wrapped_graph.invoke(input_data)
-            print(f"\\n" + "="*50)
-            print("Graph execution completed!")
-            print(f"Result: {json.dumps(result, indent=2, default=str)}")
-            print("="*50 + "\\n")
-        except Exception as e:
-            print(f"Error running graph: {e}")
-    else:
-        print("No input received. You can still run manually:")
-        print("  result = wrapped_graph.invoke(your_input)")
 
 # Restore original compile if patched
 if _original_compile:

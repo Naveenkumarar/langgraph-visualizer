@@ -10,8 +10,8 @@ let debugSession: DebugSession;
 
 export function activate(context: vscode.ExtensionContext) {
 
-    // Initialize debug session
-    debugSession = getDebugSession();
+    // Initialize debug session with extension context
+    debugSession = getDebugSession(context);
 
     // Create status bar item for visualization
     statusBarItem = vscode.window.createStatusBarItem(
@@ -171,14 +171,14 @@ export function activate(context: vscode.ExtensionContext) {
         async (pythonPath?: string) => {
             // Try to get document from webview first, then fall back to active editor
             let document = WebviewProvider.getCurrentDocument();
-            
+
             if (!document) {
                 const editor = vscode.window.activeTextEditor;
                 if (editor) {
                     document = editor.document;
                 }
             }
-            
+
             if (!document) {
                 vscode.window.showErrorMessage('No Python file found. Please open a Python file first.');
                 return;
