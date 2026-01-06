@@ -2,7 +2,7 @@
   "name": "langgraph-visualizer",
   "displayName": "LangGraph Visualizers",
   "description": "Interactive visualization of LangGraph graphs with drag-and-drop nodes, search, jump-to-code, and runtime debugging",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "smazee",
   "author": {
     "name": "Naveen Kumar"
@@ -127,6 +127,9 @@
   "dependencies": {
     "ws": "^8.14.0"
   },
+  "bundledDependencies": [
+    "ws"
+  ],
   "devDependencies": {
     "@types/vscode": "^1.80.0",
     "@types/node": "^18.x",

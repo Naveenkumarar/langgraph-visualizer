@@ -32,7 +32,10 @@ GET_STARTED.md
 QUICKSTART.md
 
 # Development artifacts
+# Exclude all node_modules EXCEPT ws (which is bundled)
 node_modules/**
+!node_modules/ws/**
+!node_modules/ws/**/*
 *.vsix
 
 # Media - keep banner for README display, keep icons

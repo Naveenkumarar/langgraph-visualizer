@@ -2,6 +2,20 @@
 
 All notable changes to the "langgraph-visualizer" extension will be documented in this file.
 
+## [0.3.1] - 2026-01-XX
+
+### 🐛 Bug Fixes
+
+- **Fixed Windows compatibility**: Bundled `ws` WebSocket module in VSIX package to fix debug functionality on Windows
+- **Module resolution**: Added `bundledDependencies` to ensure `ws` is included in extension package
+- **Cross-platform support**: Debug session now works consistently on Windows, macOS, and Linux
+
+### 🔧 Technical Changes
+
+- Added `bundledDependencies` field to `package.json` to explicitly include `ws` module
+- Updated `.vscodeignore` to allow `ws` module while excluding other dev dependencies
+- Improved module loading diagnostics for troubleshooting
+
 ## [0.3.0] - 2026-01-01
 
 ### 🎯 Major Release: Professional Agent Debugging Edition
